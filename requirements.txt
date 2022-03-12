@@ -1,0 +1,8 @@
+matplotlib==3.5.1
+numpy>=1.17
+pandas==1.4.1
+pycodestyle
+pyro-ppl==1.8.0
+torch==1.10.1
+torchvision==0.11.2
+wandb==0.12.10

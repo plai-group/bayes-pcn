@@ -1,9 +1,6 @@
-import numpy as np
-import matplotlib.pyplot as plt
 from PIL import Image
 import torch
 import torch.distributions as dist
-import torchvision
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 from typing import Tuple, Any, Optional, Callable
@@ -58,24 +55,6 @@ class MaskingNoise:
                              torch.zeros(height, n_masked_cols)),
                              dim=1).repeat((self.n_channels, 1, 1))
         return tensor * mask, mask
-
-
-def imshow(img):
-    img = img / 2 + 0.5  # unnormalize
-    npimg = img.numpy()
-    plt.imshow(np.transpose(npimg, (1, 2, 0)))
-    plt.show()
-
-
-def print_sample_images(train_loader, classes, batch_size):
-    # get some random training images
-    dataiter = iter(train_loader)
-    images, labels = dataiter.next()
-
-    # show images
-    imshow(torchvision.utils.make_grid(images))
-    # print labels
-    print(' '.join(f'{classes[labels[j]]:5s}' for j in range(batch_size)))
 
 
 class CIFAR10Recall(datasets.CIFAR10):

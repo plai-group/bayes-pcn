@@ -18,19 +18,18 @@ Weird Good Behaviour:
 """
 
 import argparse
-from copy import deepcopy
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Tuple
+from numpy import fix
 import pandas as pd
-import pickle
 import os
 import torch
 from torch.utils.data import DataLoader
 import torchvision
 import wandb
 
-from dataset import dataset_dispatcher, imshow
-from model import PCNet
-from util import DotDict
+from .dataset import dataset_dispatcher
+from .model import PCNet
+from .util import *
 
 
 def parse_args():
@@ -50,7 +49,7 @@ def parse_args():
     parser.add_argument('--weight-lr', type=float, default=0.0001)
     parser.add_argument('--activation-lr', type=float, default=0.01)
     parser.add_argument('--T-infer', type=int, default=500)
-    parser.add_argument('--F-infer', type=int, default=1)
+    parser.add_argument('--n-repeat', type=int, default=1)
     parser.add_argument('--recall-threshold', type=float, default=0.005)
     parser.add_argument('--load-path', type=str, default=None)
     parser.add_argument('--log-every', type=int, default=1, help="Log every this # of iterations")
@@ -64,80 +63,6 @@ def parse_args():
 def setup(args):
     os.makedirs(args.path, exist_ok=True)
     torch.manual_seed(args.seed)
-
-
-def save_config(config, path):
-    config = (deepcopy(config[0]), dict(config[1]))
-    config[0].to(torch.device('cpu'))
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    if os.path.exists(path):
-        os.remove(path)
-    with open(path, 'wb') as f:
-        pickle.dump(config, f)
-
-
-def load_config(path):
-    with open(path, 'rb') as f:
-        config = pickle.load(f)
-        config = (config[0], DotDict(config[1]))
-        return config
-
-
-def save_result(result, path):
-    if os.path.exists(path):
-        prev_df = pd.read_csv(path)
-        print("Will merge this previous result csv with the new result:")
-        print(prev_df)
-        df = pd.concat((prev_df, pd.DataFrame(result)))
-    else:
-        df = pd.DataFrame(result)
-    print("Result csv:")
-    print(df)
-    df.to_csv(path, index=False)
-
-
-def compare_cifar(path, index):
-    """Given the model path and index of the image in the first batch, plot images.
-
-    Args:
-        path (_type_): _description_
-        index (_type_): _description_
-    """
-    def mse(truth: torch.Tensor, pred: torch.Tensor) -> float:
-        return (truth - pred).norm(p=2) ** 2
-
-    model, args = load_config(path)
-    args.noise = 'mask'
-    train, tests, _ = dataset_dispatcher(args)
-    batch = next(iter(train))[0]
-    train_image = batch[index]
-    train_recon = model.infer(train_image.flatten().unsqueeze(0), n_repeat=1).reshape(3, 32, 32)
-    inputs, recons = [train_image], [train_recon]
-    mse_pairs = [(0., round(mse(train_image, train_recon), 4))]
-    for test in tests:
-        batch, fixed_indices = next(iter(test))
-        test_image, fixed_indices = batch[index], fixed_indices[index]
-        test_recon = model.infer(test_image.flatten().unsqueeze(0), n_repeat=100,
-                                 fixed_indices=fixed_indices.flatten().unsqueeze(0)
-                                 ).reshape(3, 32, 32)
-        inputs.append(test_image)
-        recons.append(test_recon)
-        mse_pairs.append((round(mse(train_image, test_image), 4),
-                          round(mse(train_image, test_recon), 4)))
-
-    rows = inputs + recons
-    imshow(torchvision.utils.make_grid(rows, nrow=len(rows)//2))
-    print(f"Input MSE vs Reconstruction MSE In Order: {mse_pairs}")
-
-
-def generate(path, d_batch):
-    from dataset import imshow
-    import torchvision
-    model, _ = load_config(path)
-    X_top_down, _ = model.generate(d_batch=d_batch, noise=0.05)
-    X_gen, _ = model.generate_iterative(d_batch=d_batch, noise=0.05)
-    X_total = torch.cat((X_top_down, X_gen), dim=0)
-    imshow(torchvision.utils.make_grid(X_total.reshape(-1, 3, 32, 32)))
 
 
 def score(model: PCNet, X: torch.Tensor, X_truth: torch.Tensor, acc_thresh: float,
@@ -158,7 +83,11 @@ def score(model: PCNet, X: torch.Tensor, X_truth: torch.Tensor, acc_thresh: floa
         Tuple[float, float]: Mean MSE and accuracy of the model's prediction on current batch.
     """
     X_pred = model.infer(X_obs=X, fixed_indices=fixed_indices, n_repeat=n_repeat)
-    mse = ((X_truth - X_pred)**2).sum(dim=-1)
+    if fixed_indices is not None:
+        # Only compare non-fixed data indices for scoring.
+        X_truth = X_truth * fixed_indices.logical_not()
+        X_pred = X_pred * fixed_indices.logical_not()
+    mse = ((X_truth - X_pred)**2).mean(dim=-1)
     acc = len(mse[mse < acc_thresh]) / len(mse)
     return mse.mean().item(), acc
 
@@ -229,14 +158,23 @@ def plot_batch_dict(batch_dict: Dict[str, Tuple[torch.Tensor, torch.Tensor]], mo
     Returns:
         wandb.Image: _description_
     """
-    row1, row2 = [], []
-    for X, fixed_indices in batch_dict.values():
+    rows = [None] * len(batch_dict) * 2
+    for i, (X, fixed_indices) in enumerate(batch_dict.values()):
         X, fixed_indices = X[:1], (fixed_indices[:1] if fixed_indices is not None else None)
-        row1.append(X.reshape(X_shape[1:]))
         X_pred = model.infer(X_obs=X, fixed_indices=fixed_indices, n_repeat=n_repeat)
-        row2.append(X_pred.reshape(X_shape[1:]))
-    rows = row1 + row2
-    return wandb.Image(torchvision.utils.make_grid(rows, nrow=len(rows)//2), caption=caption)
+        rows[i] = X.reshape(X_shape[1:])
+        rows[len(rows)//2+i] = X_pred.reshape(X_shape[1:])
+    img = unnormalize(torchvision.utils.make_grid(rows, nrow=len(rows)//2))
+    return wandb.Image(img, caption=caption)
+
+
+def generate_samples(model: PCNet, X_shape: torch.Size, d_batch: int, caption: str = None,
+                     n_repeat: int = None) -> wandb.Image:
+    X_ancestral, _ = model.generate_ancestral(d_batch=d_batch, noise=1.)
+    X_iterative, _ = model.generate_iterative(d_batch=d_batch, noise=1., n_repeat=n_repeat)
+    X_total = torch.cat((X_ancestral, X_iterative), dim=0)
+    img = unnormalize(torchvision.utils.make_grid(X_total.reshape(-1, *X_shape[1:]), nrow=d_batch))
+    return wandb.Image(img, caption=caption)
 
 
 def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], model: PCNet,
@@ -290,12 +228,15 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
             # Plot first images of first and current data batches
             init_img = plot_batch_dict(batch_dict=first_batch, model=model, X_shape=X_shape)
             curr_img = plot_batch_dict(batch_dict=curr_batch, model=model, X_shape=X_shape)
+            gen_img = generate_samples(model=model, X_shape=X_shape, d_batch=4,
+                                       caption="Model samples via ancestral & inference sampling.")
         if (i % log_every) == 0:
             # Log to wandb
             wandb_dict = {f"iteration/{k}": v for k, v in wandb_dict.items()}
             wandb_dict["Initial Image"] = init_img
             wandb_dict["Unseen Image"] = unseen_img
             wandb_dict["Current Image"] = curr_img
+            wandb_dict["Generated Image"] = gen_img
             wandb.log(wandb_dict)
     return model
 
@@ -324,7 +265,7 @@ def score_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
 
 def run(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], config: Dict[str, Any]):
     model, args = config
-    results_dict = {'epoch': []}
+    results_dict = {'name': args.run_name, 'seed': args.seed, 'epoch': []}
     best_scores_dict = {}
     acc_thresh = args.recall_threshold
 
@@ -367,12 +308,13 @@ def main():
     wandb.define_metric("epoch/step")
     wandb.define_metric("epoch/*", step_metric="epoch/step")
     args = DotDict(wandb.config)
+    args.run_name = wandb.run.name
 
     setup(args)
     train_loader, test_loaders, dataset_info = dataset_dispatcher(args)
     pcnet = PCNet(mode=args.pcn_mode, n_layers=args.n_layers, d_out=dataset_info.get('x_dim'),
                   d_h=args.h_dim, weight_lr=args.weight_lr, activation_lr=args.activation_lr,
-                  T_infer=args.T_infer)
+                  T_infer=args.T_infer, n_repeat=args.n_repeat)
 
     # If load_path is selected, use the current args but on a saved model
     if args.load_path is None:

@@ -218,7 +218,7 @@ class PCNet:
     """
 
     def __init__(self, mode: str, n_layers: int, d_out: int, d_h: int, weight_lr: float,
-                 activation_lr: float, T_infer: int) -> None:
+                 activation_lr: float, T_infer: int, n_repeat: int) -> None:
         """_summary_
 
         Args:
@@ -230,6 +230,7 @@ class PCNet:
             weight_lr (float): Learning rate for synaptic weights.
             activation_lr (float): Learning rate for neuron activations.
             T_infer (int): Number of activation gradient descent iterations.
+            n_repeat (int): Number of times self._infer is repeated before learning.
         """
         assert n_layers > 1
         self.n_layers = n_layers
@@ -238,6 +239,7 @@ class PCNet:
         self.weight_lr = weight_lr
         self.activation_lr = activation_lr
         self.T_infer = T_infer
+        self.n_repeat = n_repeat
         self.device = torch.device('cpu')
 
         # Populate bottom, intermediate, and top layer mappings
@@ -254,8 +256,8 @@ class PCNet:
         else:
             raise Exception(f"mode should be either 'ml' or 'bayes'.")
 
-    def generate(self, d_batch: int = 1, noise: float = 1.,
-                 ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+    def generate_ancestral(self, d_batch: int = 1, noise: float = 1.,
+                           ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
         """Generates data similar to previously observed datapoints through
         ancestral sampling.
 
@@ -274,7 +276,7 @@ class PCNet:
         activations = [X_pred + torch.randn(X_pred.shape).to(self.device) * noise] + activations
         return X_pred, activations
 
-    def generate_iterative(self, d_batch: int = 1, noise: float = 1., n_repeat: int = 100,
+    def generate_iterative(self, d_batch: int = 1, noise: float = 1., n_repeat: int = None,
                            ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
         """Generates data similar to previously observed datapoints through
         ancestral sampling.
@@ -285,20 +287,27 @@ class PCNet:
         Returns:
             torch.Tensor: Predicted mean of the output distribution.
         """
-        X_top_down, activations = self.generate(d_batch=d_batch, noise=noise)
+        X, activations = self.generate_ancestral(d_batch=d_batch, noise=noise)
+        if n_repeat is None:
+            n_repeat = self.n_repeat
         for _ in range(n_repeat):
-            X_top_down, activations = self._infer(X_obs=X_top_down, activations=activations)
-            activations[0] = X_top_down
-        return X_top_down, activations
+            X, activations = self._infer(X_obs=X, activations=activations)
+            activations[0] = X
+        return X, activations
 
     def learn(self, X_obs: torch.Tensor) -> float:
-        _, activations = self._infer(X_obs=X_obs.to(self.device))
+        activations = None
+        for _ in range(self.n_repeat):
+            _, activations = self._infer(X_obs=X_obs.to(self.device), activations=activations)
+        # _, activations = self._infer(X_obs=X_obs.to(self.device))
         self._update(activations=activations)
 
-    def infer(self, X_obs: torch.Tensor, n_repeat: int = 1,
+    def infer(self, X_obs: torch.Tensor, n_repeat: int = None,
               fixed_indices: torch.Tensor = None) -> torch.Tensor:
         original_device = X_obs.device
         X_obs, activations = X_obs.to(self.device), None
+        if n_repeat is None:
+            n_repeat = self.n_repeat
         if fixed_indices is not None:
             fixed_indices = fixed_indices.to(self.device)
 
@@ -399,7 +408,7 @@ class PCNet:
             layer.update(X_obs=lower_activation, X_in=upper_activation, lr=lr)
 
     def _init_hidden_activations(self, d_batch: int = 1) -> torch.Tensor:
-        # return self.generate(d_batch=d_batch)[1][1:]
+        # return self.generate_ancestral(d_batch=d_batch)[1][1:]
         # return [torch.randn(d_batch, self.d_h).to(self.device) for _ in range(self.n_layers-1)]
         # return [torch.zeros(d_batch, self.d_h).to(self.device) for _ in range(self.n_layers-1)]
         return [0.1 * torch.randn(d_batch, self.layers[i].W.shape[0]).to(self.device)

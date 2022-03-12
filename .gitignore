@@ -1,4 +1,6 @@
+.vscode
 data
 env
 runs
-__pycache__
+**/__pycache__
+wandb
