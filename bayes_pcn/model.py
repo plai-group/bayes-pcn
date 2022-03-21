@@ -1,6 +1,7 @@
-from typing import List, Tuple
+import pyro
 import torch
 import torch.nn.functional as F
+from typing import List, Tuple
 
 
 class AbstractPCLayer:
@@ -87,9 +88,12 @@ class BayesPCLayer(PCLayer):
         self.W = torch.empty(d_in, d_out)  # MatrixNormal prior mean matrix
         self.U = torch.eye(d_in) * 1e0    # MatrixNormal prior row-wise covariance matrix
         self.V = torch.eye(d_out) * 1e0   # MatrixNormal prior column-wise covariance matrix
-        self.Sigma_obs = 1e0  # torch.eye(d_out) * 1e-1  # Observation covariance matrix
+        self.Sigma_obs = 1e-1  # Isotropic covariance matrix scaling
+
+        self.L = None
 
         torch.nn.init.kaiming_normal_(self.W)
+        self.d_out = d_out
         self.weight_lr = weight_lr
         self.device = torch.device('cpu')
 
@@ -112,19 +116,34 @@ class BayesPCLayer(PCLayer):
 
         self.W = self.W + Sigma_c_T_Sigma_x_inv.matmul(error)
         self.U = self.U - Sigma_c_T_Sigma_x_inv.matmul(Sigma_c)
+        self.L = None
+
+    def sample_weights(self):
+        if self.L is None:
+            stability_term = 1e-6 * torch.eye(self.U.shape[0]).to(self.device)
+            self.L = torch.linalg.cholesky(self.U + stability_term)
+        self.L = self.L.to(self.device)
+        return self.W + self.L.matmul(torch.randn(self.W.shape).to(self.device))
+
+    def fix_weights(self, weights_sample: torch.Tensor) -> None:
+        """Only used within HMC. Sets posterior mean to a fixed sampled value.
+
+        Args:
+            weights_sample (torch.Tensor): Sampled latent mean.
+        """
+        self.W = weights_sample
 
     def to(self, device: torch.device) -> None:
         self.device = device
         self.W = self.W.to(device)
         self.U = self.U.to(device)
         self.V = self.V.to(device)
-        # self.Sigma_obs = self.Sigma_obs.to(device)
 
 
 class PCTopLayer(AbstractPCLayer):
-    def __init__(self, d_mem: int, weight_lr: float) -> None:
-        self.b = torch.randn(d_mem)
-        self.d_mem = d_mem
+    def __init__(self, d_out: int, weight_lr: float) -> None:
+        self.b = torch.randn(d_out)
+        self.d_out = d_out
         self.weight_lr = weight_lr
         self.device = torch.device('cpu')
 
@@ -137,7 +156,7 @@ class PCTopLayer(AbstractPCLayer):
                 not necessary.
 
         Returns:
-            (torch.Tensor): Predicted lower layer neuron values of shape <d_batch x d_mem>.
+            (torch.Tensor): Predicted lower layer neuron values of shape <d_batch x d_out>.
         """
         d_batch = 1 if X_in is None else X_in.shape[0]
         return self.b.repeat(d_batch, 1)
@@ -146,7 +165,7 @@ class PCTopLayer(AbstractPCLayer):
         """Locally Hebbian weight update
 
         Args:
-            X_obs (torch.Tensor): Observed neuron values of shape <d_batch x d_mem>.
+            X_obs (torch.Tensor): Observed neuron values of shape <d_batch x d_out>.
             X_in (torch.Tensor): Dummy value.
             lr (float, optional): Learning rate for layer weights.
         """
@@ -169,14 +188,16 @@ class PCTopLayer(AbstractPCLayer):
 
 
 class BayesPCTopLayer(PCTopLayer):
-    def __init__(self, d_mem: int, weight_lr: float) -> None:
-        # self.b = torch.randn(d_mem)
-        self.b = torch.zeros(d_mem)
-        self.Sigma_prior = torch.eye(d_mem) * 1e0  # Prior covariance matrix (diagonal)
-        self.Sigma_obs = torch.eye(d_mem)  # Observation covariance matrix (diagonal)
-        self.d_mem = d_mem
+    def __init__(self, d_out: int, weight_lr: float) -> None:
+        # self.b = torch.randn(d_out)
+        self.b = torch.zeros(d_out)
+        self.Sigma_prior = torch.eye(d_out) * 1e0  # Prior covariance matrix (diagonal)
+        self.Sigma_obs = 1e0  # Isotropic covariance matrix scaling
+        self.d_out = d_out
         self.weight_lr = weight_lr
         self.device = torch.device('cpu')
+
+        self.L = None  # Related to sampling weights
 
     def update(self, X_obs: torch.Tensor, X_in: torch.Tensor, lr: float = None) -> None:
         """Locally Hebbian Bayesian weight update
@@ -184,25 +205,41 @@ class BayesPCTopLayer(PCTopLayer):
         NOTE: It would be interesting to enable individually weighted regression here
 
         Args:
-            X_obs (torch.Tensor): Observed neuron values of shape <d_batch x d_mem>.
+            X_obs (torch.Tensor): Observed neuron values of shape <d_batch x d_out>.
             X_in (torch.Tensor): Dummy value.
             lr (float, optional): Learning rate for layer weights.
         """
         d_batch = X_obs.shape[0]
         mu_prior = self.b
-        Sigma_prior_inv, Sigma_obs_inv = 1/self.Sigma_prior.diag(), 1/self.Sigma_obs.diag()
+        Sigma_prior_inv = 1/self.Sigma_prior.diag()
+        Sigma_obs_inv = 1/self.Sigma_obs * torch.ones(self.d_out).to(self.device)
         Sigma_posterior = (1 / (d_batch * Sigma_obs_inv + Sigma_prior_inv)).diag()
         mu_posterior = Sigma_posterior.matmul(
-                            mu_prior * Sigma_prior_inv + Sigma_obs_inv * X_obs.sum(dim=0))
+                            Sigma_prior_inv * mu_prior + Sigma_obs_inv * X_obs.sum(dim=0))
 
         self.b = mu_posterior
         self.Sigma_prior = Sigma_posterior
+        self.L = None
+
+    def sample_weights(self):
+        if self.L is None:
+            stability_term = 1e-6 * torch.eye(self.Sigma_prior.shape[0]).to(self.device)
+            self.L = torch.linalg.cholesky(self.Sigma_prior + stability_term)
+        self.L = self.L.to(self.device)
+        return self.b + self.L.matmul(torch.randn(self.b.shape).to(self.device))
+
+    def fix_weights(self, weights_sample: torch.Tensor) -> None:
+        """Only used within HMC. Sets posterior mean to a fixed sampled value.
+
+        Args:
+            weights_sample (torch.Tensor): Sampled latent mean.
+        """
+        self.b = weights_sample
 
     def to(self, device: torch.device) -> None:
         self.device = device
         self.b = self.b.to(device)
         self.Sigma_prior = self.Sigma_prior.to(device)
-        self.Sigma_obs = self.Sigma_obs.to(device)
 
 
 class PCNet:
@@ -233,6 +270,7 @@ class PCNet:
             n_repeat (int): Number of times self._infer is repeated before learning.
         """
         assert n_layers > 1
+        self.mode = mode
         self.n_layers = n_layers
         self.d_h = d_h
         self.d_out = d_out
@@ -243,18 +281,33 @@ class PCNet:
         self.device = torch.device('cpu')
 
         # Populate bottom, intermediate, and top layer mappings
-        if mode == 'ml':
-            self.layers = [PCLayer(d_in=d_h, d_out=d_out, weight_lr=weight_lr)]
-            for _ in range(self.n_layers-2):
-                self.layers.append(PCLayer(d_in=d_h, d_out=d_h, weight_lr=weight_lr))
-            self.layers.append(PCTopLayer(d_mem=d_h, weight_lr=weight_lr))
-        elif mode == 'bayes':
-            self.layers = [BayesPCLayer(d_in=d_h, d_out=d_out, weight_lr=weight_lr)]
-            for _ in range(self.n_layers-2):
-                self.layers.append(BayesPCLayer(d_in=d_h, d_out=d_h, weight_lr=weight_lr))
-            self.layers.append(BayesPCTopLayer(d_mem=d_h, weight_lr=weight_lr))
-        else:
-            raise Exception(f"mode should be either 'ml' or 'bayes'.")
+        self.reset()
+
+    def sample_weights(self) -> List[torch.Tensor]:
+        all_weights = []
+        for layer in self.layers:
+            weights = layer.sample_weights()
+            all_weights.append(weights)
+        return all_weights
+
+    def fix_weights(self, layer_weights: List[torch.Tensor]) -> None:
+        for layer, weights in zip(self.layers, layer_weights):
+            layer.fix_weights(weights)
+
+    def sample_data(self, obs: torch.Tensor = None) -> torch.Tensor:
+        d_batch = obs.shape[0] if obs is not None else 1
+        activations = []
+        X = torch.empty(d_batch, self.d_h).to(self.device)
+        with pyro.plate("d_batch", size=d_batch, dim=-2):
+            for i, layer in reversed(list(enumerate(self.layers))):
+                mu = layer.predict(X_in=X)
+                Sigma = layer.Sigma_obs * torch.ones(d_batch, layer.d_out).to(self.device)
+                dist = pyro.distributions.Normal(mu, Sigma)
+                if obs is None and i == 0:
+                    obs = mu  # Do not sample from the last layer
+                X = pyro.sample(f"layer_{i}", dist, obs=obs if i == 0 else None)
+                activations.append(X)
+            return X
 
     def generate_ancestral(self, d_batch: int = 1, noise: float = 1.,
                            ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
@@ -327,6 +380,25 @@ class PCNet:
         for layer in self.layers:
             layer.to(device)
 
+    def reset(self) -> None:
+        mode = self.mode
+        d_h = self.d_h
+        d_out = self.d_out
+        weight_lr = self.weight_lr
+        if mode == 'ml':
+            self.layers = [PCLayer(d_in=d_h, d_out=d_out, weight_lr=weight_lr)]
+            for _ in range(self.n_layers-2):
+                self.layers.append(PCLayer(d_in=d_h, d_out=d_h, weight_lr=weight_lr))
+            self.layers.append(PCTopLayer(d_out=d_h, weight_lr=weight_lr))
+        elif mode == 'bayes':
+            self.layers = [BayesPCLayer(d_in=d_h, d_out=d_out, weight_lr=weight_lr)]
+            for _ in range(self.n_layers-2):
+                self.layers.append(BayesPCLayer(d_in=d_h, d_out=d_h, weight_lr=weight_lr))
+            self.layers.append(BayesPCTopLayer(d_out=d_h, weight_lr=weight_lr))
+        else:
+            raise Exception(f"mode should be either 'ml' or 'bayes'.")
+        self.to(self.device)
+
     def _infer(self, X_obs: torch.Tensor, activations: List[torch.Tensor] = None,
                fixed_indices: torch.Tensor = None) -> Tuple[torch.Tensor, List[torch.Tensor]]:
         """Given some input which is either a novel datapoint or a noisy version of
@@ -366,8 +438,13 @@ class PCNet:
                 upper_error = upper_layer.error(X_obs=activation, X_in=upper_activation)
                 lower_error = lower_layer.error(X_obs=lower_activation, X_in=activation)
 
+                upper_Sigma_obs = upper_layer.Sigma_obs
+                lower_Sigma_obs = lower_layer.Sigma_obs
                 lower_f_grad = lower_layer.f_grad(activation)
-                joint_grad = lower_f_grad * lower_error.matmul(lower_layer.W.T) - upper_error
+
+                upper_term = - upper_error / upper_Sigma_obs
+                lower_term = lower_f_grad * lower_error.matmul(lower_layer.W.T) / lower_Sigma_obs
+                joint_grad = lower_term + upper_term
                 activations[i] = activations[i] + lr * joint_grad
 
                 if i == 1:
@@ -391,6 +468,93 @@ class PCNet:
             X_pred = X_pred * fixed_indices.logical_not() + X_obs * fixed_indices
         return X_pred, activations
 
+    # def _infer(self, X_obs: torch.Tensor, activations: List[torch.Tensor] = None,
+    #            fixed_indices: torch.Tensor = None) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+    #     """Given some input which is either a novel datapoint or a noisy version of
+    #     previously seen data, return the model's best denoised guess of the input.
+    #     First, fix 0th layer neuron activations. Then, repeatedly adjust hidden layer
+    #     activations to minimize the global energy. Lastly, return the model's prediction
+    #     of 0th neuron layer activations.
+
+    #     Args:
+    #         X_obs (torch.Tensor): Input data of shape <d_batch x d_out>.
+    #         activations (List[torch.Tensor], optional): List of layer activations to start from.
+    #         fixed_indices (torch.Tensor): Boolean matrix of shape <d_batch x d_out> that denotes
+    #             which X_obs indices to prevent modification.
+
+    #     Returns:
+    #         Tuple[torch.Tensor, List[torch.Tensor]]: Returns the denoised input data and
+    #             a list of network activations that most likely generated the input data.
+    #     """
+    #     lr = self.activation_lr
+    #     d_batch = X_obs.shape[0]
+    #     if activations is None:
+    #         activations = [X_obs] + self._init_hidden_activations(d_batch=d_batch)
+    #     has_fixed_indices = fixed_indices is not None and fixed_indices.max() == 1
+
+    #     # update hidden layer activations
+    #     prev_batch_joint_mse = None
+    #     prev_cov_batch_joint_mse = None
+    #     for t in range(1, self.T_infer+1):
+    #         batch_joint_mse = torch.zeros(d_batch).to(self.device)
+    #         cov_batch_joint_mse = torch.zeros_like(batch_joint_mse)
+    #         for i in range(1, len(activations)):
+    #             # upper_activation is not needed for top level activation update.
+    #             upper_activation = activations[i+1] if i+1 < len(activations) else None
+    #             activation = activations[i]
+    #             lower_activation = activations[i-1]
+    #             upper_layer = self.layers[i]
+    #             lower_layer = self.layers[i-1]
+
+    #             upper_error = upper_layer.error(X_obs=activation, X_in=upper_activation)
+    #             lower_error = lower_layer.error(X_obs=lower_activation, X_in=activation)
+
+    #             upper_Sigma_obs = upper_layer.Sigma_obs
+    #             if i + 1 < len(activations):
+    #                 upper_f, upper_U = upper_layer.f(upper_activation), upper_layer.U
+    #                 upper_scaling = upper_Sigma_obs + upper_f.matmul(upper_U).matmul(upper_f.T)
+    #                 upper_scaling = upper_scaling.diag().unsqueeze(-1)  # treat data independently
+    #             else:
+    #                 upper_scaling = upper_Sigma_obs + upper_layer.Sigma_prior[0, 0]  #TODO: PATCH!
+    #             upper_term = upper_error / upper_scaling
+
+    #             lower_f_grad, lower_f = lower_layer.f_grad(activation), lower_layer.f(activation)
+    #             lower_Sigma_obs, lower_U = lower_layer.Sigma_obs, lower_layer.U
+    #             lower_scaling = lower_Sigma_obs + lower_f.matmul(lower_U).matmul(lower_f.T)
+    #             lower_scaling = lower_scaling.diag().unsqueeze(-1)  # treat data independently
+    #             lower_term = lower_f_grad * ((lower_error / lower_scaling).matmul(lower_layer.W.T)
+    #                                          + (lower_error ** 2).sum(dim=-1).unsqueeze(-1)
+    #                                          * lower_f.matmul(lower_U) / (lower_scaling**2))
+
+    #             joint_grad = lower_term - upper_term
+    #             activations[i] = activations[i] + lr * joint_grad
+
+    #             if i == 1:
+    #                 batch_joint_mse += 0.5 * lower_error.norm(p=2, dim=-1) ** 2
+    #                 cov_batch_joint_mse += 0.5 / lower_scaling.squeeze()\
+    #                                        * lower_error.norm(p=2, dim=-1) ** 2
+    #             batch_joint_mse += 0.5 * upper_error.norm(p=2, dim=-1) ** 2
+    #             cov_batch_joint_mse += 0.5 / upper_scaling.squeeze()\
+    #                                    * upper_error.norm(p=2, dim=-1) ** 2
+
+    #         if has_fixed_indices:
+    #             X_pred = self.layers[0].predict(activations[1])
+    #             activations[0] = X_pred * fixed_indices.logical_not() + X_obs * fixed_indices
+
+    #         # if t == 1 or t == self.T_infer:
+    #         #     print(f"Batch Joint MSE ({t}): {batch_joint_mse}")
+    #         if t>1 and (torch.abs(cov_batch_joint_mse - prev_cov_batch_joint_mse)>1e-3).sum()==0:
+    #             break
+    #         else:
+    #             prev_batch_joint_mse = batch_joint_mse
+    #             prev_cov_batch_joint_mse = cov_batch_joint_mse
+
+    #     X_pred = self.layers[0].predict(activations[1])
+    #     if has_fixed_indices:
+    #         # fix indices in X_pred to values in X_obs if necessary
+    #         X_pred = X_pred * fixed_indices.logical_not() + X_obs * fixed_indices
+    #     return X_pred, activations
+
     def _update(self, activations: List[torch.Tensor]) -> None:
         """Performs a single gradient update of PCNet weights. Equivalent to minimizing the
         global energy function w.r.t. PCN weights. Must be called with the output of self.infer().
@@ -408,8 +572,35 @@ class PCNet:
             layer.update(X_obs=lower_activation, X_in=upper_activation, lr=lr)
 
     def _init_hidden_activations(self, d_batch: int = 1) -> torch.Tensor:
-        # return self.generate_ancestral(d_batch=d_batch)[1][1:]
-        # return [torch.randn(d_batch, self.d_h).to(self.device) for _ in range(self.n_layers-1)]
-        # return [torch.zeros(d_batch, self.d_h).to(self.device) for _ in range(self.n_layers-1)]
-        return [0.1 * torch.randn(d_batch, self.layers[i].W.shape[0]).to(self.device)
-                for i in range(self.n_layers-1)]
+        return [torch.ones(d_batch, layer.d_out).to(self.device) for layer in self.layers[1:]]
+        # activations = []
+        # X = torch.empty(d_batch, self.d_h).to(self.device)
+        # for layer in reversed(self.layers[1:]):
+        #     mu = layer.predict(X_in=X)
+        #     if isinstance(layer, PCTopLayer):
+        #         upper_term = layer.Sigma_prior[0][0]  # TODO: Patch
+        #     elif isinstance(layer, PCLayer):
+        #         upper_term = X[-1].matmul(layer.U).matmul(X[-1]).diag()
+        #     else:
+        #         raise NotImplementedError()
+        #     sigma = (layer.Sigma_obs + upper_term) ** 0.5
+        #     X = mu + sigma * torch.randn(d_batch, layer.d_out).to(self.device)
+        #     activations.append(X)
+        # return activations[::-1]
+
+
+class PCNetEnsemble:
+    def __init__(self, pcnets: List[PCNet]) -> None:
+        self._pcnets = pcnets
+
+    def get_member(self, index: int) -> PCNet:
+        return self._pcnets[index]
+
+    def sample(self):
+        pcnet_probs = torch.ones(len(self._pcnets)) / len(self._pcnets)
+        pcnet = self.get_member(torch.multinomial(pcnet_probs, num_samples=1).item())
+        return pcnet.sample_data()
+
+    def to(self, device: torch.device):
+        for pcnet in self._pcnets:
+            pcnet.to(device)

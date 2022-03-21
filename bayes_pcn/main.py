@@ -19,7 +19,6 @@ Weird Good Behaviour:
 
 import argparse
 from typing import Any, Dict, Tuple
-from numpy import fix
 import pandas as pd
 import os
 import torch
@@ -170,9 +169,7 @@ def plot_batch_dict(batch_dict: Dict[str, Tuple[torch.Tensor, torch.Tensor]], mo
 
 def generate_samples(model: PCNet, X_shape: torch.Size, d_batch: int, caption: str = None,
                      n_repeat: int = None) -> wandb.Image:
-    X_ancestral, _ = model.generate_ancestral(d_batch=d_batch, noise=1.)
-    X_iterative, _ = model.generate_iterative(d_batch=d_batch, noise=1., n_repeat=n_repeat)
-    X_total = torch.cat((X_ancestral, X_iterative), dim=0)
+    X_total = torch.cat([model.sample_data() for _ in range(d_batch)], dim=0)
     img = unnormalize(torchvision.utils.make_grid(X_total.reshape(-1, *X_shape[1:]), nrow=d_batch))
     return wandb.Image(img, caption=caption)
 
@@ -263,7 +260,8 @@ def score_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
     return wandb_dict
 
 
-def run(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], config: Dict[str, Any]):
+def run(train_loader: DataLoader, test_loaders: Dict[str, DataLoader],
+        config: Tuple[PCNet, Dict[str, Any]]):
     model, args = config
     results_dict = {'name': args.run_name, 'seed': args.seed, 'epoch': []}
     best_scores_dict = {}
