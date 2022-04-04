@@ -13,7 +13,7 @@ from .dataset import dataset_dispatcher
 
 def save_config(config, path):
     config = (deepcopy(config[0]), dict(config[1]))
-    config[0].to(torch.device('cpu'))
+    config[0].device = torch.device('cpu')
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if os.path.exists(path):
         os.remove(path)

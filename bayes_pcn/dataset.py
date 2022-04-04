@@ -1,6 +1,6 @@
 from PIL import Image
 import torch
-import torch.distributions as dist
+import torch.distributions as dists
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 from typing import Tuple, Any, Optional, Callable
@@ -30,9 +30,9 @@ class DropoutNoise:
 
     def __call__(self, tensor):
         if self.n_channels == 0:
-            mask = dist.Bernoulli(torch.ones(tensor.shape) * (1-self.p)).sample()
+            mask = dists.Bernoulli(torch.ones(tensor.shape) * (1-self.p)).sample()
         else:
-            mask = dist.Bernoulli(torch.ones(tensor.size()[1:]) * (1-self.p)).sample()
+            mask = dists.Bernoulli(torch.ones(tensor.size()[1:]) * (1-self.p)).sample()
             mask = mask.unsqueeze(0).repeat((self.n_channels, 1, 1))
         return tensor * mask, mask
 
