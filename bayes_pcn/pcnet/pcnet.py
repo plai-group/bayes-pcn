@@ -8,10 +8,12 @@ from .util import *
 
 class PCNet:
     def __init__(self, n_layers: int, x_dim: int, h_dim: int, act_fn: ActFn,
-                 sigma_prior: float, sigma_obs: float, scale_layer: bool) -> None:
+                 sigma_prior: float, sigma_obs: float, sigma_data: float,
+                 scale_layer: bool) -> None:
         self._layers = self._init_layers(n_layers=n_layers, x_dim=x_dim, d_h=h_dim,
                                          sigma_prior=sigma_prior, sigma_obs=sigma_obs,
-                                         act_fn=act_fn, scale_layer=scale_layer)
+                                         sigma_data=sigma_data, act_fn=act_fn,
+                                         scale_layer=scale_layer)
         self.layer_log_prob_strat = None
         self.layer_sample_strat = None
         self.layer_update_strat = None
@@ -63,15 +65,15 @@ class PCNet:
             layer.update(X_obs=lower_activation, X_in=upper_activation, **kwargs)
 
     def _init_layers(self, n_layers: int, x_dim: int, d_h: int, sigma_prior: float,
-                     sigma_obs: float, act_fn: ActFn, scale_layer: bool, **kwargs
-                     ) -> List[AbstractPCLayer]:
-        shared_args = dict(sigma_prior=sigma_prior, sigma_obs=sigma_obs)
+                     sigma_obs: float, sigma_data: float, act_fn: ActFn, scale_layer: bool,
+                     **kwargs) -> List[AbstractPCLayer]:
+        sigma_obs_l0 = sigma_obs if sigma_data is None else sigma_data
         layers = [PCLayer(d_in=d_h, d_out=x_dim, act_fn=act_fn, scale_layer=scale_layer,
-                          **shared_args, **kwargs)]
+                          sigma_prior=sigma_prior, sigma_obs=sigma_obs_l0, **kwargs)]
         for _ in range(n_layers-2):
             layers.append(PCLayer(d_in=d_h, d_out=d_h, act_fn=act_fn, scale_layer=scale_layer,
-                                  **shared_args, **kwargs))
-        layers.append(PCTopLayer(d_out=d_h, **shared_args, **kwargs))
+                                  sigma_prior=sigma_prior, sigma_obs=sigma_obs, **kwargs))
+        layers.append(PCTopLayer(d_out=d_h, sigma_prior=sigma_prior, sigma_obs=sigma_obs, **kwargs))
         return layers
 
     @property

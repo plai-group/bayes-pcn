@@ -28,6 +28,7 @@ def parse_args():
     parser.add_argument('--h-dim', type=int, default=256)
     parser.add_argument('--sigma-prior', type=float, default=1.)
     parser.add_argument('--sigma-obs', type=float, default=0.1)
+    parser.add_argument('--sigma-data', type=float, default=0.01)
     parser.add_argument('--scale-layer', action='store_true', help='normalize layer activations.')
     parser.add_argument('--act-fn', type=ActFn,
                         default=ActFn.RELU, choices=list(ActFn))
@@ -58,9 +59,11 @@ def parse_args():
     # training configs
     parser.add_argument('--weight-lr', type=float, default=0.0001)
     parser.add_argument('--activation-lr', type=float, default=0.01)
+    parser.add_argument('--activation-optim', choices=['adam', 'sgd'], default='adam')
     parser.add_argument('--T-infer', type=int, default=500)
     parser.add_argument('--n-proposal-samples', type=int, default=1)
-    parser.add_argument('--n-repeat', type=int, default=1)
+    parser.add_argument('--n-repeat', type=int, default=1,
+                        help='how much ICM iteration to perform at inference.')
     parser.add_argument('--resample', action='store_true', help='resample if using n-models > 1.')
 
     # eval configs
@@ -86,10 +89,10 @@ def run(train_loader: DataLoader, test_loaders: Dict[str, DataLoader],
 
     for e in range(1, args.n_epoch+1):
         train_epoch(train_loader=train_loader, test_loaders=test_loaders, model=model, epoch=e,
-                    log_every=args.log_every, plot_every=args.plot_every, acc_thresh=acc_thresh,
-                    fast_mode=args.dataset_mode == 'fast')
-        result_dict = score_epoch(train_loader=train_loader, test_loaders=test_loaders,
-                                  model=model, acc_thresh=acc_thresh, epoch=e)
+                    n_repeat=args.n_repeat, log_every=args.log_every, plot_every=args.plot_every,
+                    acc_thresh=acc_thresh, fast_mode=args.dataset_mode == 'fast')
+        result_dict = score_epoch(train_loader=train_loader, test_loaders=test_loaders, epoch=e,
+                                  model=model, acc_thresh=acc_thresh, n_repeat=args.n_repeat)
         save_config(config, f'{args.path}/latest.pt')
 
         results_dict['epoch'].append(e)
@@ -131,7 +134,9 @@ def main():
     model = PCNetEnsemble(n_models=args.n_models, n_layers=args.n_layers, h_dim=args.h_dim,
                           x_dim=dataset_info.get('x_dim'), act_fn=args.act_fn, infer_T=args.T_infer,
                           infer_lr=args.activation_lr, sigma_prior=args.sigma_prior,
-                          sigma_obs=args.sigma_obs, n_proposal_samples=args.n_proposal_samples,
+                          sigma_obs=args.sigma_obs, sigma_data=args.sigma_data,
+                          n_proposal_samples=args.n_proposal_samples,
+                          activation_optim=args.activation_optim,
                           activation_init_strat=args.activation_init_strat,
                           layer_log_prob_strat=args.layer_log_prob_strat,
                           layer_sample_strat=args.layer_sample_strat,
@@ -146,10 +151,11 @@ def main():
     else:
         config = (load_config(args.load_path)[0], args)
     if torch.cuda.device_count() > 0:
-        model.device = torch.device('cuda')
+        model.device = torch.device('cpu')  # torch.device('cuda')
 
     result = run(train_loader=train_loader, test_loaders=test_loaders, config=config)
     save_result(result=result, path=f"{args.path}/result.csv")
+    wandb.finish()
 
 
 if __name__ == "__main__":

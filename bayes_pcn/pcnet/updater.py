@@ -13,10 +13,11 @@ from .util import *
 class AbstractUpdater(ABC):
     def __init__(self, activation_init_fn: Callable[[torch.Tensor], ActivationGroup],
                  infer_lr: float, infer_T: int, proposal_strat: EnsembleProposalStrat,
-                 n_proposal_samples: int, resample: bool = False,
+                 n_proposal_samples: int, activation_optim: str, resample: bool = False,
                  ensemble_log_joint: Callable[[ActivationGroup], torch.Tensor] = None,
                  **kwargs) -> None:
         self._activation_init_fn: Callable[[torch.Tensor], ActivationGroup] = activation_init_fn
+        self._activation_optim = activation_optim
         self._infer_lr = infer_lr
         self._infer_T = infer_T
         self._proposal_strat = proposal_strat
@@ -46,15 +47,16 @@ class MLUpdater(AbstractUpdater):
         recovered mode of the (joint) log joint closest to X_obs.
         """
         assert len(pcnets) == 1
-        info = {'mean_losses': dict()}
+        info = {}
         for i, pcnet in enumerate(pcnets):
             a_group = self._activation_init_fn(X_obs=X_obs)
             # Update hidden layer while fixing obs layer
             a_group.clamp(obs=True, hidden=False)
-            mean_losses = maximize_log_joint(log_joint_fn=pcnet.log_joint, a_group=a_group,
-                                             infer_T=self._infer_T, infer_lr=self._infer_lr)
+            fit_info = maximize_log_joint(log_joint_fn=pcnet.log_joint, a_group=a_group,
+                                          infer_T=self._infer_T, infer_lr=self._infer_lr,
+                                          activation_optim=self._activation_optim)
             pcnet.update_weights(a_group=a_group, lr=kwargs.get('weight_lr'))
-            info['mean_losses'][i] = mean_losses
+            info[f"model_{i}"] = fit_info
         return UpdateResult(pcnets=pcnets, log_weights=log_weights, info=info)
 
 
@@ -73,7 +75,7 @@ class AbstractVLBUpdater(AbstractUpdater):
             output = self._fit_sample_proposal(**fit_sample_args)
             a_groups_all = output[0] * len(pcnets)
             log_sample_weights = [output[1]] * len(pcnets)
-            stats = [output[2]]
+            stats = [output[2]] * len(pcnets)
         else:
             a_groups_all = []
             log_sample_weights = []
@@ -89,16 +91,21 @@ class AbstractVLBUpdater(AbstractUpdater):
         # Update PCNets and log weights.
         new_pcnets = []
         new_log_weights = []
+        fit_info = {}
         for i, pcnet in enumerate(pcnets):
             log_weight_model = log_weights[i]
             a_groups_model = a_groups_all[i:i+n_samples]
             log_sample_weights_model = log_sample_weights[i:i+n_samples]
+            stat_model = stats[i]
+            j = i
             for a_group, log_sample_weight in zip(a_groups_model, log_sample_weights_model):
                 new_pcnet = deepcopy(pcnet)
                 new_pcnet.update_weights(a_group=a_group)
                 new_pcnets.append(new_pcnet)
                 new_log_weight = log_weight_model + log_sample_weight.sum()
                 new_log_weights.append(new_log_weight)
+                fit_info[f"model_{j}"] = stat_model
+                j = j + 1
         new_log_weights = torch.tensor(new_log_weights).to(log_weights.device)
         new_log_weights = new_log_weights - torch.logsumexp(new_log_weights, dim=-1)
         # HACK: renormalize again to correct numerical error
@@ -108,8 +115,7 @@ class AbstractVLBUpdater(AbstractUpdater):
         if self._resample:
             new_pcnets, new_log_weights = ess_resample(objs=new_pcnets, log_weights=new_log_weights,
                                                        ess_thresh=0.5)
-        info = {'mean_losses': stats}
-        return UpdateResult(pcnets=new_pcnets, log_weights=new_log_weights, info=info)
+        return UpdateResult(pcnets=new_pcnets, log_weights=new_log_weights, info=fit_info)
 
     @abstractmethod
     def _build_proposal(self, log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
@@ -132,7 +138,8 @@ class AbstractVLBUpdater(AbstractUpdater):
         # Update hidden layer while fixing obs layer
         a_group.clamp(obs=True, hidden=False)
         fit_info = maximize_log_joint(log_joint_fn=log_joint_fn, a_group=a_group,
-                                      infer_T=self._infer_T, infer_lr=self._infer_lr)
+                                      infer_T=self._infer_T, infer_lr=self._infer_lr,
+                                      activation_optim=self._activation_optim)
         proposal = self._build_proposal(log_joint_fn=log_joint_fn, a_group=a_group)
         return proposal, {'layer_dims': a_group.dims, **fit_info}
 
@@ -175,10 +182,6 @@ class VLBModeUpdater(AbstractVLBUpdater):
         X_obs = a_group.get_acts(layer_index=0)
         dims = a_group.dims
         return Dirac(mean_vectors=mean_vectors, X_obs=X_obs, dims=dims)
-
-    @property
-    def samples_from_q(self):
-        return False
 
 
 class VLBFullUpdater(AbstractVLBUpdater):

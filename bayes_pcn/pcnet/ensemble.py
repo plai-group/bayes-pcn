@@ -12,7 +12,8 @@ class PCNetEnsemble:
     # def __init__(self, args: Dict[str, Any]) -> None:
     def __init__(self, n_models: int, n_layers: int, x_dim: int, h_dim: int, act_fn: ActFn,
                  infer_T: int, infer_lr: float, sigma_prior: float, sigma_obs: float,
-                 n_proposal_samples: int, activation_init_strat: str, layer_log_prob_strat: str,
+                 sigma_data: float, activation_optim: str, n_proposal_samples: int,
+                 activation_init_strat: str, layer_log_prob_strat: str,
                  layer_sample_strat: str, layer_update_strat: str, ensemble_log_joint_strat: str,
                  ensemble_proposal_strat: str, scale_layer: bool, resample: bool, **kwargs) -> None:
         self._n_models: int = n_models
@@ -21,7 +22,9 @@ class PCNetEnsemble:
         self._h_dim: int = h_dim
         self._sigma_prior: float = sigma_prior
         self._sigma_obs: float = sigma_obs
+        self._sigma_data: float = sigma_data
         self._scale_layer: bool = scale_layer
+        self._activation_optim: str = activation_optim
         self._log_weights: torch.Tensor = (torch.ones(self._n_models) / self._n_models).log()
         act_fn = ActFn.get_enum_from_value(act_fn)
 
@@ -39,7 +42,8 @@ class PCNetEnsemble:
         update_fn_args = dict(activation_init_fn=self._initialize_activation_group,
                               proposal_strat=self.ensemble_proposal_strat,
                               infer_lr=infer_lr, infer_T=infer_T, resample=resample,
-                              n_proposal_samples=n_proposal_samples)
+                              n_proposal_samples=n_proposal_samples,
+                              activation_optim=activation_optim)
         if self.ensemble_log_joint_strat == EnsembleLogJointStrat.SHARED:
             update_fn_args['ensemble_log_joint'] = self.log_joint
 
@@ -63,22 +67,28 @@ class PCNetEnsemble:
             fixed_indices = fixed_indices.to(self.device)
         a_group = self._initialize_activation_group(X_obs=X_obs)
 
+        infer_info = dict()
         for n in range(n_repeat):
             # Update hidden layer while fixing obs layer
             a_group.clamp(obs=True, hidden=False)
-            info = maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
-                                      infer_lr=self._updater.infer_lr,
-                                      infer_T=self._updater.infer_T, fixed_indices=fixed_indices)
+            hidden_info = maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
+                                             infer_lr=self._updater.infer_lr,
+                                             infer_T=self._updater.infer_T,
+                                             fixed_indices=fixed_indices,
+                                             activation_optim=self._activation_optim)
+            obs_info = None
             if fixed_indices is None:
                 # Update obs layer while fixing hidden layers
                 a_group.clamp(obs=False, hidden=True)
-                info = maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
-                                          infer_lr=self._updater.infer_lr,
-                                          infer_T=self._updater.infer_T,
-                                          fixed_indices=fixed_indices)
+                obs_info = maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
+                                              infer_lr=self._updater.infer_lr,
+                                              infer_T=self._updater.infer_T,
+                                              fixed_indices=fixed_indices,
+                                              activation_optim=self._activation_optim)
+            infer_info[f"repeat_{n}"] = {'hidden': hidden_info, 'obs': obs_info}
 
         X_pred = a_group.get_acts(layer_index=0, detach=True).to(original_device)
-        return Prediction(data=X_pred, a_group=a_group, info=info)
+        return Prediction(data=X_pred, a_group=a_group, info=infer_info)
 
     def learn(self, X_obs: torch.Tensor) -> UpdateResult:
         X_obs = X_obs.to(self.device)
@@ -119,13 +129,13 @@ class PCNetEnsemble:
 
     def _initialize_base_models(self, n_models: int, act_fn: ActFn) -> List[PCNet]:
         return [PCNet(n_layers=self._n_layers, x_dim=self._x_dim, h_dim=self._h_dim,
-                      sigma_prior=self._sigma_prior, sigma_obs=self._sigma_obs, act_fn=act_fn,
-                      scale_layer=self._scale_layer)
+                      sigma_prior=self._sigma_prior, sigma_obs=self._sigma_obs,
+                      sigma_data=self._sigma_data, act_fn=act_fn, scale_layer=self._scale_layer)
                 for _ in range(n_models)]
 
     def _initialize_activation_group(self, X_obs: torch.Tensor) -> ActivationGroup:
         d_batch = X_obs.shape[0]
-        activations = [X_obs]
+        activations = [deepcopy(X_obs)]
         if self.activation_init_strat == ActInitStrat.FIXED:
             for _ in range(self._n_layers-1):
                 activations.append(torch.ones(d_batch, self._h_dim).to(self.device))

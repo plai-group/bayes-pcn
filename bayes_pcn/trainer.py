@@ -1,20 +1,15 @@
+import math
+from matplotlib import pyplot as plt
 import pandas as pd
+import PIL
 import torch
 import torchvision
 from torch.utils.data import DataLoader
-from typing import Dict, NamedTuple, Tuple
+from typing import Dict, Tuple
 import wandb
 
-from .pcnet import PCNetEnsemble
-from .util import unnormalize
-
-
-class DataBatch(NamedTuple):
-    train: Tuple[torch.Tensor, torch.Tensor]
-    tests: Dict[str, Tuple[torch.Tensor, torch.Tensor]]
-    original_shape: torch.Size
-    train_pred: Tuple[torch.Tensor, torch.Tensor] = None
-    tests_pred: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = None
+from .pcnet import PCNetEnsemble, DataBatch, UpdateResult
+from .util import fig2img, unnormalize
 
 
 def get_next_data_batch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader]) -> DataBatch:
@@ -40,35 +35,42 @@ def get_next_data_batch(train_loader: DataLoader, test_loaders: Dict[str, DataLo
 
 
 def score_data_batch(data_batch: DataBatch, model: PCNetEnsemble, acc_thresh: float,
-                     prefix: str = None) -> Tuple[Dict[str, float], DataBatch]:
+                     n_repeat: int, prefix: str = None) -> Tuple[Dict[str, float], DataBatch]:
     """Compute the model's recall MSE and accuracy on train and test batches in data_batch.
 
     Args:
         data_batch (DataBatch): _description_
         model (PCNetEnsemble): _description_
         acc_thresh (float): _description_
+        n_repeat (int): _description_
         prefix (str, optional): _description_. Defaults to None.
 
     Returns:
         Dict[str, float]: _description_
     """
     result = {}
+    batch_info = {}
     X_truth = data_batch.train[0]
     prefix = f"/{prefix}" if prefix is not None else ""
-    train_pred = model.infer(X_obs=X_truth, fixed_indices=None).data
-    mse_train, acc_train = score(X_pred=train_pred, X_truth=X_truth, acc_thresh=acc_thresh,
-                                 fixed_indices=None)
+
+    train_result = model.infer(X_obs=X_truth, n_repeat=n_repeat, fixed_indices=None)
+    mse_train, acc_train = score(X_pred=train_result.data, X_truth=X_truth,
+                                 acc_thresh=acc_thresh, fixed_indices=None)
     result.update({f"train{prefix}_mse": mse_train, f"train{prefix}_acc": acc_train})
+    batch_info["train"] = train_result.info
+
     tests_pred = {}
     for name, (X, fixed_indices) in data_batch.tests.items():
-        X_pred = model.infer(X_obs=X, fixed_indices=fixed_indices).data
-        mse_test, acc_test = score(X_pred=X_pred, X_truth=X_truth, acc_thresh=acc_thresh,
-                                   fixed_indices=fixed_indices)
+        test_result = model.infer(X_obs=X, n_repeat=n_repeat, fixed_indices=fixed_indices)
+        batch_info[name] = test_result.info
+        mse_test, acc_test = score(X_pred=test_result.data, X_truth=X_truth,
+                                   acc_thresh=acc_thresh, fixed_indices=fixed_indices)
         result.update({f"{name}{prefix}_mse": mse_test, f"{name}{prefix}_acc": acc_test})
-        tests_pred[name] = (X_pred, fixed_indices)
+        tests_pred[name] = (test_result.data, fixed_indices)
+
     result_data_batch = DataBatch(train=data_batch.train, tests=data_batch.tests,
-                                  original_shape=data_batch.original_shape,
-                                  train_pred=(train_pred, None), tests_pred=tests_pred)
+                                  train_pred=(train_result.data, None), tests_pred=tests_pred,
+                                  original_shape=data_batch.original_shape, info=batch_info)
     return result, result_data_batch
 
 
@@ -90,6 +92,41 @@ def plot_data_batch(data_batch: DataBatch, caption: str = None) -> wandb.Image:
         rows[i+1] = X[0][:1].reshape(X_shape[1:])
         rows[len(rows)//2+i+1] = X_pred[0][:1].reshape(X_shape[1:])
     img = unnormalize(torchvision.utils.make_grid(rows, nrow=len(rows)//2))
+    return wandb.Image(img, caption=caption)
+
+
+def plot_update_energy(update_result: UpdateResult, caption: str = None) -> wandb.Image:
+    """Plot the min, max, and mean energy trajectory of a batch, averaged across models.
+
+    Args:
+        update_result (UpdateResult): Update result from model.learn.
+
+    Returns:
+        wandb.Image: Weights and Biases image detailing the plot.
+    """
+    update_info = update_result.info
+    model_names = []
+    all_mean_losses = []
+    all_min_losses = []
+    all_max_losses = []
+    for model_name, model_fit_info in update_info.items():
+        model_names.append(model_name)
+        all_mean_losses.append(model_fit_info['mean_losses'])
+        all_min_losses.append(model_fit_info['min_losses'])
+        all_max_losses.append(model_fit_info['max_losses'])
+    ncols = min(4, len(update_info))
+    nrows = math.ceil(len(update_info)/ncols)
+    fig, ax = plt.subplots(ncols=ncols, nrows=nrows, squeeze=False)
+    for i in range(len(update_info)):
+        ax_obj = ax[i // nrows, i % nrows]
+        ax_obj.set_title(f"{model_names[i]}")
+        x = [i for i in range(1, len(all_mean_losses[i]) + 1)]
+        ax_obj.plot(x, all_mean_losses[i], 'b-')
+        ax_obj.plot(x, all_min_losses[i], 'b--')
+        ax_obj.plot(x, all_max_losses[i], 'b--')
+    img = fig2img(fig=fig)
+    # fig.canvas.draw()
+    # img = PIL.Image.frombytes('RGB', fig.canvas.get_width_height(), fig.canvas.tostring_rgb())
     return wandb.Image(img, caption=caption)
 
 
@@ -130,8 +167,8 @@ def score(X_pred: torch.Tensor, X_truth: torch.Tensor, acc_thresh: float,
 
 
 def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], model: PCNetEnsemble,
-                epoch: int, log_every: int = 1, plot_every: int = 1, acc_thresh: float = 0.005,
-                fast_mode: bool = False) -> PCNetEnsemble:
+                epoch: int, n_repeat: int, log_every: int = 1, plot_every: int = 1,
+                acc_thresh: float = 0.005, fast_mode: bool = False) -> PCNetEnsemble:
     """Update model on all datapoint once. Assess model performance on unnoised and noised data.
 
     Args:
@@ -156,24 +193,26 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         if i == 1:
             first_batch = curr_batch
         wandb_dict = {"step": (epoch - 1) * len(train_loader) + i}
-        init_img, unseen_img, curr_img = None, None, None
+        init_img, unseen_img, curr_img, gen_img, update_img = None, None, None, None, None
 
         # Evaluate model performance on the current data batch before update
         if not fast_mode and (i % log_every) == 0:
             result, pred_batch = score_data_batch(data_batch=curr_batch, model=model,
-                                                  acc_thresh=acc_thresh, prefix='unseen')
+                                                  acc_thresh=acc_thresh, n_repeat=n_repeat,
+                                                  prefix='unseen')
             wandb_dict.update(result)
             if (i % plot_every) == 0:
                 unseen_img = plot_data_batch(data_batch=pred_batch)
 
         # Update model
         X_train = curr_batch.train[0]
-        model.learn(X_obs=X_train)
+        update_result = model.learn(X_obs=X_train)
 
         # Evaluate model performance on the first data batch
         if not fast_mode and (i % log_every) == 0:
             result, pred_batch = score_data_batch(data_batch=first_batch, model=model,
-                                                  acc_thresh=acc_thresh, prefix='initial')
+                                                  acc_thresh=acc_thresh, n_repeat=n_repeat,
+                                                  prefix='initial')
             wandb_dict.update(result)
             if (i % plot_every) == 0:
                 init_img = plot_data_batch(data_batch=pred_batch)
@@ -181,15 +220,18 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         # Evaluate model performance on the current data batches after update
         if (i % log_every) == 0:
             result, pred_batch = score_data_batch(data_batch=curr_batch, model=model,
-                                                  acc_thresh=acc_thresh, prefix='current')
+                                                  acc_thresh=acc_thresh, n_repeat=n_repeat,
+                                                  prefix='current')
             wandb_dict.update(result)
             if (i % plot_every) == 0:
                 curr_img = plot_data_batch(data_batch=pred_batch)
 
-        # Generate data samples
+        # Generate data samples and plot log loss trajectory
         if (i % plot_every) == 0:
             gen_img = generate_samples(model=model, X_shape=X_shape, d_batch=8,
                                        caption="Model samples via ancestral sampling.")
+            update_img = plot_update_energy(update_result=update_result,
+                                            caption="Activation update energy curve (avg/min/max).")
 
         # Log to wandb
         if (i % log_every) == 0:
@@ -198,19 +240,22 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
             wandb_dict["Unseen Image"] = unseen_img
             wandb_dict["Current Image"] = curr_img
             wandb_dict["Generated Image"] = gen_img
+            wandb_dict["Update Energy Plot"] = update_img
             wandb.log(wandb_dict)
     return model
 
 
 def score_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], model: PCNetEnsemble,
-                acc_thresh: float, epoch: int) -> Dict[str, float]:
+                acc_thresh: float, epoch: int, n_repeat: int) -> Dict[str, float]:
     train_loader = iter(train_loader)
     test_loaders = {name: iter(test_loader) for name, test_loader in test_loaders.items()}
 
     scores = []
-    for _ in range(1, len(train_loader)+1):
+    for _ in range(len(train_loader)):
         batch = get_next_data_batch(train_loader=train_loader, test_loaders=test_loaders)
-        scores.append(score_data_batch(data_batch=batch, model=model, acc_thresh=acc_thresh)[0])
+        score, pred_batch = score_data_batch(data_batch=batch, model=model,
+                                             acc_thresh=acc_thresh, n_repeat=n_repeat)
+        scores.append(score)
     score_df = pd.DataFrame(scores)
 
     wandb_dict = {"step": epoch}

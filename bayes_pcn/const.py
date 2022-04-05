@@ -49,3 +49,20 @@ class ActFn(ArgParseEnum):
     RELU = 'relu'
     GELU = 'gelu'
     SOFTMAX = 'softmax'
+
+
+class Dataset(ArgParseEnum):
+    CIFAR10 = 'cifar10'
+
+
+class DatasetMode(ArgParseEnum):
+    FAST = 'fast'
+    MIX = 'mix'
+    WHITE = 'white'
+    DROP = 'drop'
+    MASK = 'mask'
+
+
+class Optimizer(ArgParseEnum):
+    ADAM = 'adam'
+    SGD = 'sgd'

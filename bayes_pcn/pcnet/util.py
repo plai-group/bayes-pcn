@@ -124,8 +124,18 @@ class ActivationGroup:
         self._device = device
         if self._original_obs:
             self._original_obs.to(device)
-        for acts in self._data:
-            acts.to(device)
+            self._original_obs = self._original_obs.to(device)
+        for i in range(len(self._data)):
+            self._data[i] = self._data[i].to(device)
+
+
+class DataBatch(NamedTuple):
+    train: Tuple[torch.Tensor, torch.Tensor]
+    tests: Dict[str, Tuple[torch.Tensor, torch.Tensor]]
+    original_shape: torch.Size
+    train_pred: Tuple[torch.Tensor, torch.Tensor] = None
+    tests_pred: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = None
+    info: Dict[str, Any] = None
 
 
 class Prediction(NamedTuple):
@@ -195,7 +205,8 @@ class MVN(BaseDistribution):
 
 def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
                        a_group: ActivationGroup, infer_T: int, infer_lr: float,
-                       fixed_indices: torch.Tensor = None, **kwargs) -> List[float]:
+                       activation_optim: str, fixed_indices: torch.Tensor = None,
+                       **kwargs) -> List[float]:
     """Move in the space of activation vectors to minimize log joint under the model.
     a_group is modified in place. To clarify, the model is defined by its log_joint_fn.
     Depending on what part of a_group is 'clamped' or not updated by gradient descent,
@@ -206,48 +217,33 @@ def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
         log_joint_fn (Callable[[ActivationGroup], torch.Tensor]): A function that accepts
             an ActivationGroup object and returns log probability vector of shape <d_batch>.
         a_group (ActivationGroup): Initial coordinate at the activation space.
-        train_mode (bool): Whether to ----------------------------------------------------------
         infer_T (int): Maximum number of gradient descent iterations.
         infer_lr (float): Gradient descent learning rate.
+        activation_optim (str): Which optimizer to use for gradient descent.
         fixed_indices (torch.Tensor, optional): Boolean matrix of shape <d_batch x d_out> that
             denotes which observation neuron indices to prevent modification. Defaults to None.
 
     Returns:
         List[float]: A list of mean batch loss over time.
-
-
-    == GOALS ==
-    UPDATE
-    1. Fix input layer, change hidden layers to get the latent code
-
-    INFERENCE w/o fixed_indices
-    1. Fix input layer, change hidden layers to get the latent code
-    2. Fix hidden layers, change input layer to get the reconstruction
-
-    INFERENCE w/ fixed_indices
-    1. Fix input layer neurons specified by fixed_indices, change all layers
-
-    == IMPLEMENTATION ==
-    UPDATE
-    1. Set clamp_obs to True from outside and run this method
-
-    INFERENCE w/o fixed_indices
-    1. Set clamp_obs to True from outside and run this method
-    2. Set clamp_latents to True from outside and run this method
-
-    INFERENCE w/ fixed_indices
-    1. Don't clamp anything from outside and run this method, and this method
-    takes care of fixed_indices logic
     """
     mean_losses = []
+    min_losses = []
+    max_losses = []
     prev_log_joint = None
     has_fixed_indices = fixed_indices is not None and fixed_indices.max().item() == 1
     if has_fixed_indices:
         a_group.clamp(obs=False, hidden=False)
 
-    optimizer = torch.optim.Adam(a_group.data, lr=infer_lr)
+    if activation_optim == 'adam':
+        optim_cls = torch.optim.Adam
+    elif activation_optim == 'sgd':
+        optim_cls = torch.optim.SGD
+    else:
+        raise NotImplementedError()
+    optimizer = optim_cls(a_group.data, lr=infer_lr)
     optimizer.zero_grad()
-    for _ in range(1, infer_T+1):
+
+    for _ in range(infer_T):
         log_joint = log_joint_fn(a_group)
         loss = -log_joint.sum(dim=0)
         loss.backward()
@@ -261,14 +257,18 @@ def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
             a_group.set_acts(layer_index=0, value=corrected_obs)
 
         mean_losses.append(loss.item() / a_group.d_batch)
+        min_losses.append(-log_joint.min().item())
+        max_losses.append(-log_joint.max().item())
         early_stop = early_stop_infer(log_joint=log_joint, prev_log_joint=prev_log_joint)
         prev_log_joint = log_joint
         if early_stop:
             break
 
     mean_losses.extend([mean_losses[-1]] * (infer_T - len(mean_losses)))
+    min_losses.extend([min_losses[-1]] * (infer_T - len(min_losses)))
+    max_losses.extend([max_losses[-1]] * (infer_T - len(max_losses)))
     a_group.clamp(obs=True, hidden=True)
-    return {'mean_losses': mean_losses}
+    return {'mean_losses': mean_losses, 'min_losses': min_losses, 'max_losses': max_losses}
 
 
 def early_stop_infer(log_joint: torch.Tensor, prev_log_joint: torch.Tensor) -> bool:

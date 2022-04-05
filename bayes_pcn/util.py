@@ -1,8 +1,10 @@
+import io
 import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pandas as pd
 import pickle
+from PIL import Image
 import torch
 import torchvision
 
@@ -37,6 +39,15 @@ def unnormalize(img):
 def imshow(img):
     plt.imshow(unnormalize(img))
     plt.show()
+
+
+def fig2img(fig):
+    """Convert a Matplotlib figure to a PIL Image and return it"""
+    buf = io.BytesIO()
+    fig.savefig(buf)
+    buf.seek(0)
+    img = Image.open(buf)
+    return img
 
 
 def save_result(result, path):
