@@ -16,13 +16,12 @@ from .trainer import train_epoch, score_epoch
 def parse_args():
     parser = argparse.ArgumentParser()
     # general configs
-    parser.add_argument('--path', type=str, default='runs/default')
+    parser.add_argument('--path', type=str, default=None)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--load-path', type=str, default=None)
     parser.add_argument('--wandb-mode', type=str, choices=['online', 'offline'], default='online')
 
     # model configs
-    parser.add_argument('--pcn-mode', type=str, choices=['ml', 'bayes'], default='ml')
     parser.add_argument('--n-models', type=int, default=2)
     parser.add_argument('--n-layers', type=int, default=2)
     parser.add_argument('--h-dim', type=int, default=256)
@@ -57,7 +56,7 @@ def parse_args():
     parser.add_argument('--n-epoch', type=int, default=1)
 
     # training configs
-    parser.add_argument('--weight-lr', type=float, default=0.0001)
+    parser.add_argument('--weight-lr', type=float, default=0.001)
     parser.add_argument('--activation-lr', type=float, default=0.01)
     parser.add_argument('--activation-optim', choices=['adam', 'sgd'], default='adam')
     parser.add_argument('--T-infer', type=int, default=500)
@@ -129,6 +128,8 @@ def main():
     args = DotDict(wandb.config)
     args.run_name = wandb.run.name
 
+    if args.path is None:
+        args.path = f'runs/{args.run_name}'
     setup(args)
     train_loader, test_loaders, dataset_info = dataset_dispatcher(args)
     model = PCNetEnsemble(n_models=args.n_models, n_layers=args.n_layers, h_dim=args.h_dim,
@@ -143,7 +144,8 @@ def main():
                           layer_update_strat=args.layer_update_strat,
                           ensemble_log_joint_strat=args.ensemble_log_joint_strat,
                           ensemble_proposal_strat=args.ensemble_proposal_strat,
-                          scale_layer=args.scale_layer, resample=args.resample)
+                          scale_layer=args.scale_layer, resample=args.resample,
+                          weight_lr=args.weight_lr)
 
     # If load_path is selected, use the current args but on a saved model
     if args.load_path is None:

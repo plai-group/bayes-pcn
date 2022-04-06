@@ -44,6 +44,8 @@ class PCNetEnsemble:
                               infer_lr=infer_lr, infer_T=infer_T, resample=resample,
                               n_proposal_samples=n_proposal_samples,
                               activation_optim=activation_optim)
+        if self.layer_update_strat == LayerUpdateStrat.ML:
+            update_fn_args['weight_lr'] = kwargs.get('weight_lr', None)
         if self.ensemble_log_joint_strat == EnsembleLogJointStrat.SHARED:
             update_fn_args['ensemble_log_joint'] = self.log_joint
 

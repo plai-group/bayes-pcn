@@ -1,0 +1,43 @@
+program: -mbayes_pcn
+method: grid
+parameters:
+  seed:
+    value: 0
+  n_models:
+    values: [1, 4]
+  n_layers:
+    values: [2, 4]
+  h_dim:
+    value: 256
+  sigma_prior:
+    value: 1.
+  sigma_obs:
+    value: 0.1
+  sigma_data:
+    value: 0.01
+  act_fn:
+    value: "relu"
+  layer_log_prob_strat:
+    value: "p_pred"
+  layer_sample_strat:
+    value: "map"
+  layer_update_strat:
+    value: "bayes"
+  ensemble_log_joint_strat:
+    value: "shared"
+  ensemble_proposal_strat:
+    values: ["mode", "full"]
+  dataset:
+    value: "cifar10"
+  dataset_mode:
+    value: "mask"
+  n_data:
+    values: [128, 256]
+  n_batch:
+    value: 1
+  n_epoch:
+    value: 1
+  activation_lr:
+    values: [0.01, 0.005]
+  T_infer:
+    value: 500

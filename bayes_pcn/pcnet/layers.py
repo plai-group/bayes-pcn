@@ -169,7 +169,7 @@ class PCLayer(AbstractPCLayer):
         scaling = 1/(X_in.shape[-1] ** 0.5) if self._scale else 1
         return result * scaling
 
-    def _ml_update(self, X_obs: torch.Tensor, X_in: torch.Tensor) -> None:
+    def _ml_update(self, X_obs: torch.Tensor, X_in: torch.Tensor, **kwargs) -> None:
         """Take a gradient step for the network parameters self._R. The gradient is
         averaged over the minibatch not summed.
 
@@ -181,7 +181,8 @@ class PCLayer(AbstractPCLayer):
 
         error = self._error(X_obs=X_obs, X_in=X_in)
         grad = self._f(X_in).T.matmul(error) / self._Sigma
-        self._R = self._R + self._weight_lr / d_batch * grad
+        weight_lr = kwargs.get('lr', self._weight_lr)
+        self._R = self._R + weight_lr / d_batch * grad
 
     def _bayes_update(self, X_obs: torch.Tensor, X_in: torch.Tensor) -> None:
         """Bayesian Multivariate linear regression update.
@@ -275,7 +276,8 @@ class PCTopLayer(AbstractPCLayer):
             X_obs (torch.Tensor): Observed neuron values of shape <d_batch x d_out>.
             lr (float, optional): Learning rate for layer weights.
         """
-        self._R = self._R + self._weight_lr * self._error(X_obs=X_obs).mean(dim=0)
+        weight_lr = kwargs.get('lr', self._weight_lr)
+        self._R = self._R + weight_lr * self._error(X_obs=X_obs).mean(dim=0)
 
     def _bayes_update(self, X_obs: torch.Tensor, **kwargs) -> None:
         """Bayesian normal normal conjugate update.

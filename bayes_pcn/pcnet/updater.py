@@ -41,6 +41,15 @@ class AbstractUpdater(ABC):
 
 
 class MLUpdater(AbstractUpdater):
+    def __init__(self, activation_init_fn: Callable[[torch.Tensor], ActivationGroup],
+                 infer_lr: float, infer_T: int, proposal_strat: EnsembleProposalStrat,
+                 n_proposal_samples: int, activation_optim: str, resample: bool = False,
+                 ensemble_log_joint: Callable[[ActivationGroup], torch.Tensor] = None,
+                 **kwargs) -> None:
+        super().__init__(activation_init_fn, infer_lr, infer_T, proposal_strat, n_proposal_samples,
+                         activation_optim, resample, ensemble_log_joint, **kwargs)
+        self._weight_lr = kwargs.get('weight_lr', None)
+
     def __call__(self, X_obs: torch.Tensor, pcnets: List[PCNet], log_weights: torch.Tensor,
                  **kwargs) -> UpdateResult:
         """Perform a single gradient descent update on all PCNets parameters using the
@@ -55,7 +64,7 @@ class MLUpdater(AbstractUpdater):
             fit_info = maximize_log_joint(log_joint_fn=pcnet.log_joint, a_group=a_group,
                                           infer_T=self._infer_T, infer_lr=self._infer_lr,
                                           activation_optim=self._activation_optim)
-            pcnet.update_weights(a_group=a_group, lr=kwargs.get('weight_lr'))
+            pcnet.update_weights(a_group=a_group, lr=kwargs.get('weight_lr', self._weight_lr))
             info[f"model_{i}"] = fit_info
         return UpdateResult(pcnets=pcnets, log_weights=log_weights, info=info)
 
