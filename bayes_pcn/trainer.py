@@ -8,6 +8,8 @@ from torch.utils.data import DataLoader
 from typing import Dict, Tuple
 import wandb
 
+from bayes_pcn.pcnet.util import fixed_indices_exists
+
 from .pcnet import PCNetEnsemble, DataBatch, UpdateResult
 from .util import fig2img, unnormalize
 
@@ -63,9 +65,13 @@ def score_data_batch(data_batch: DataBatch, model: PCNetEnsemble, acc_thresh: fl
     for name, (X, fixed_indices) in data_batch.tests.items():
         test_result = model.infer(X_obs=X, n_repeat=n_repeat, fixed_indices=fixed_indices)
         batch_info[name] = test_result.info
+        mse_base, _ = score(X_pred=X, X_truth=X_truth,
+                            acc_thresh=acc_thresh, fixed_indices=fixed_indices)
         mse_test, acc_test = score(X_pred=test_result.data, X_truth=X_truth,
                                    acc_thresh=acc_thresh, fixed_indices=fixed_indices)
-        result.update({f"{name}{prefix}_mse": mse_test, f"{name}{prefix}_acc": acc_test})
+        result.update({f"{name}{prefix}_base": mse_base,
+                       f"{name}{prefix}_mse": mse_test,
+                       f"{name}{prefix}_acc": acc_test})
         tests_pred[name] = (test_result.data, fixed_indices)
 
     result_data_batch = DataBatch(train=data_batch.train, tests=data_batch.tests,
@@ -116,17 +122,16 @@ def plot_update_energy(update_result: UpdateResult, caption: str = None) -> wand
         all_max_losses.append(model_fit_info['max_losses'])
     ncols = min(4, len(update_info))
     nrows = math.ceil(len(update_info)/ncols)
-    fig, ax = plt.subplots(ncols=ncols, nrows=nrows, squeeze=False)
+    fig, ax = plt.subplots(ncols=ncols, nrows=nrows, squeeze=False, sharex=True, sharey=True)
     for i in range(len(update_info)):
-        ax_obj = ax[i // nrows, i % nrows]
+        ax_obj = ax[i // ncols, i % ncols]
         ax_obj.set_title(f"{model_names[i]}")
         x = [i for i in range(1, len(all_mean_losses[i]) + 1)]
         ax_obj.plot(x, all_mean_losses[i], 'b-')
         ax_obj.plot(x, all_min_losses[i], 'b--')
         ax_obj.plot(x, all_max_losses[i], 'b--')
+    fig.tight_layout()
     img = fig2img(fig=fig)
-    # fig.canvas.draw()
-    # img = PIL.Image.frombytes('RGB', fig.canvas.get_width_height(), fig.canvas.tostring_rgb())
     return wandb.Image(img, caption=caption)
 
 
@@ -156,7 +161,7 @@ def score(X_pred: torch.Tensor, X_truth: torch.Tensor, acc_thresh: float,
         Tuple[float, float]: Mean MSE and accuracy of the model's prediction on current batch.
     """
     scaling = X_pred.shape[-1]
-    if fixed_indices is not None:
+    if fixed_indices_exists(fixed_indices=fixed_indices):
         # Only compare non-fixed data indices for scoring.
         X_truth = X_truth * fixed_indices.logical_not()
         X_pred = X_pred * fixed_indices.logical_not()
@@ -226,6 +231,21 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
             if (i % plot_every) == 0:
                 curr_img = plot_data_batch(data_batch=pred_batch)
 
+        # # TMP!!!
+        # res = model.delete(X_obs=X_train)
+        # del_result, pred_batch = score_data_batch(data_batch=curr_batch, model=model,
+        #                                           acc_thresh=acc_thresh, n_repeat=n_repeat,
+        #                                           prefix='delete')
+        # wandb_dict.update(del_result)
+        # del_img = plot_data_batch(data_batch=pred_batch)
+        # ret = model.learn(X_obs=X_train)
+        # ret_result, pred_batch = score_data_batch(data_batch=curr_batch, model=model,
+        #                                           acc_thresh=acc_thresh, n_repeat=n_repeat,
+        #                                           prefix='return')
+        # wandb_dict.update(ret_result)
+        # ret_img = plot_data_batch(data_batch=pred_batch)
+        # # TMP!!!
+
         # Generate data samples and plot log loss trajectory
         if (i % plot_every) == 0:
             gen_img = generate_samples(model=model, X_shape=X_shape, d_batch=8,
@@ -241,6 +261,8 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
             wandb_dict["Current Image"] = curr_img
             wandb_dict["Generated Image"] = gen_img
             wandb_dict["Update Energy Plot"] = update_img
+            # wandb_dict["Deleted Image"] = del_img
+            # wandb_dict["Restored Image"] = ret_img
             wandb.log(wandb_dict)
     return model
 

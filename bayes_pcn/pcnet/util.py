@@ -183,10 +183,26 @@ class Dirac(BaseDistribution):
         return torch.zeros(a_group.d_batch).to(self.device)
 
 
+def safe_mvn(mean_vectors: torch.Tensor, precision_matrices: torch.Tensor
+             ) -> dists.MultivariateNormal:
+    try:
+        return dists.MultivariateNormal(loc=mean_vectors, precision_matrix=precision_matrices)
+    except ValueError:
+        safe_precision_matrices = []
+        for precision_matrix in precision_matrices:
+            try:
+                torch.linalg.cholesky(precision_matrix)
+            except RuntimeError:
+                precision_matrix = precision_matrix.diag().max(torch.tensor(1.)).diag()
+            safe_precision_matrices.append(precision_matrix)
+        safe_precision_matrices = torch.stack(safe_precision_matrices, dim=0)
+        return dists.MultivariateNormal(loc=mean_vectors, precision_matrix=safe_precision_matrices)
+
+
 class MVN(BaseDistribution):
     def __init__(self, mean_vectors: torch.Tensor, precision_matrices: torch.Tensor,
                  X_obs: torch.Tensor, dims: List[int]) -> None:
-        self.dist = dists.MultivariateNormal(loc=mean_vectors, precision_matrix=precision_matrices)
+        self.dist = safe_mvn(mean_vectors=mean_vectors, precision_matrices=precision_matrices)
         self.X_obs = X_obs.clone()
         self.dims = dims
         self.device = X_obs.device
@@ -230,7 +246,7 @@ def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
     min_losses = []
     max_losses = []
     prev_log_joint = None
-    has_fixed_indices = fixed_indices is not None and fixed_indices.max().item() == 1
+    has_fixed_indices = fixed_indices_exists(fixed_indices=fixed_indices)
     if has_fixed_indices:
         a_group.clamp(obs=False, hidden=False)
 
@@ -287,14 +303,22 @@ def early_stop_infer(log_joint: torch.Tensor, prev_log_joint: torch.Tensor) -> b
     return ((log_joint - prev_log_joint).abs() > 1e-3).sum() == 0
 
 
-def ess_resample(self, objs: List[Any], log_weights: torch.Tensor, ess_thresh: float
-                 ) -> Tuple[List[Any], torch.Tensor]:
+def ess_resample(objs: List[Any], log_weights: torch.Tensor, ess_thresh: float,
+                 n_selected: int) -> Tuple[List[Any], torch.Tensor]:
     n_objects = len(objs)
     weights = log_weights.exp()
-    ess = weights.sum().square() / weights.square().sum()
+    ess = 1 / n_objects * (weights.sum().square() / weights.square().sum())
     if ess >= ess_thresh:
         return objs, log_weights
     log_weights = (torch.ones(n_objects) / n_objects).log().to(weights.device)
-    indices = torch.multinomial(input=weights, num_samples=n_objects, replacement=True)
-    objs = [objs[index] for index in indices]
+    indices = torch.multinomial(input=weights, num_samples=n_selected, replacement=True)
+    objs = [deepcopy(objs[index]) for index in indices]
     return objs, log_weights
+
+
+def assert_positive_definite(matrix: torch.Tensor):
+    torch.linalg.cholesky(matrix)
+
+
+def fixed_indices_exists(fixed_indices: torch.Tensor) -> bool:
+    return fixed_indices is not None and fixed_indices.max().item() == 1

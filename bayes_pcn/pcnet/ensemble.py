@@ -15,7 +15,7 @@ class PCNetEnsemble:
                  sigma_data: float, activation_optim: str, n_proposal_samples: int,
                  activation_init_strat: str, layer_log_prob_strat: str,
                  layer_sample_strat: str, layer_update_strat: str, ensemble_log_joint_strat: str,
-                 ensemble_proposal_strat: str, scale_layer: bool, resample: bool, **kwargs) -> None:
+                 ensemble_proposal_strat: str, scale_layer: bool, **kwargs) -> None:
         self._n_models: int = n_models
         self._n_layers: int = n_layers
         self._x_dim: int = x_dim
@@ -41,11 +41,14 @@ class PCNetEnsemble:
 
         update_fn_args = dict(activation_init_fn=self._initialize_activation_group,
                               proposal_strat=self.ensemble_proposal_strat,
-                              infer_lr=infer_lr, infer_T=infer_T, resample=resample,
+                              infer_lr=infer_lr, infer_T=infer_T,
                               n_proposal_samples=n_proposal_samples,
                               activation_optim=activation_optim)
         if self.layer_update_strat == LayerUpdateStrat.ML:
             update_fn_args['weight_lr'] = kwargs.get('weight_lr', None)
+        if self.layer_update_strat == LayerUpdateStrat.BAYES:
+            update_fn_args['resample'] = kwargs.get('resample', False)
+            update_fn_args['sigma_forget'] = kwargs.get('sigma_forget', 0.)
         if self.ensemble_log_joint_strat == EnsembleLogJointStrat.SHARED:
             update_fn_args['ensemble_log_joint'] = self.log_joint
 
@@ -61,16 +64,39 @@ class PCNetEnsemble:
         else:
             raise NotImplementedError()
 
+    def delete(self, X_obs: torch.Tensor, fixed_indices: torch.Tensor = None) -> None:
+        """Delete an observation from the memory. NOTE: Numerically unstable at the moment.
+
+        Args:
+            X_obs (torch.Tensor): Observation to delete.
+            fixed_indices (torch.Tensor, optional): Matrix of shape <d_batch x x_dim> that denotes
+                which data-specific indices to prevent modification when predicting.
+        """
+        X_obs = X_obs.to(self.device)
+        if fixed_indices_exists(fixed_indices=fixed_indices):
+            fixed_indices = fixed_indices.to(self.device)
+        a_group = self._initialize_activation_group(X_obs=X_obs)
+
+        # Update hidden layer while fixing obs layer
+        a_group.clamp(obs=True, hidden=False)
+        maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
+                           infer_lr=self._updater.infer_lr, infer_T=self._updater.infer_T,
+                           fixed_indices=fixed_indices, activation_optim=self._activation_optim)
+        for pcnet in self._pcnets:
+            pcnet.delete_from_weights(a_group=a_group)
+
     def infer(self, X_obs: torch.Tensor, fixed_indices: torch.Tensor = None,
               n_repeat: int = 1) -> Prediction:
         original_device = X_obs.device
         X_obs = X_obs.to(self.device)
-        if fixed_indices is not None:
+        if fixed_indices_exists(fixed_indices=fixed_indices):
             fixed_indices = fixed_indices.to(self.device)
         a_group = self._initialize_activation_group(X_obs=X_obs)
 
         infer_info = dict()
-        for n in range(n_repeat):
+        for n in range(1, n_repeat+1):
+            data_acts = a_group.get_acts(layer_index=0, detach=True)
+            a_group = self._initialize_activation_group(X_obs=data_acts)
             # Update hidden layer while fixing obs layer
             a_group.clamp(obs=True, hidden=False)
             hidden_info = maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
@@ -78,8 +104,7 @@ class PCNetEnsemble:
                                              infer_T=self._updater.infer_T,
                                              fixed_indices=fixed_indices,
                                              activation_optim=self._activation_optim)
-            obs_info = None
-            if fixed_indices is None:
+            if not fixed_indices_exists(fixed_indices=fixed_indices):
                 # Update obs layer while fixing hidden layers
                 a_group.clamp(obs=False, hidden=True)
                 obs_info = maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
@@ -94,8 +119,8 @@ class PCNetEnsemble:
 
     def learn(self, X_obs: torch.Tensor) -> UpdateResult:
         X_obs = X_obs.to(self.device)
-        update_result = self._updater(X_obs=X_obs, pcnets=self._pcnets,
-                                      log_weights=self._log_weights)
+        updater_args = dict(X_obs=X_obs, pcnets=self._pcnets, log_weights=self._log_weights)
+        update_result = self._updater(**updater_args)
         self._pcnets = update_result.pcnets
         self._log_weights = update_result.log_weights
         return update_result
@@ -104,6 +129,12 @@ class PCNetEnsemble:
         ljs = torch.stack([pcnet.log_joint(a_group=a_group) for pcnet in self._pcnets], dim=1)
         weighted_ljs = ljs + self._log_weights.unsqueeze(0)
         return torch.logsumexp(weighted_ljs, dim=-1)
+
+    def rebind(self, X_obs: torch.Tensor, fixed_indices: torch.Tensor) -> UpdateResult:
+        delete_result = self.delete(X_obs=X_obs, fixed_indices=fixed_indices)
+        learn_result = self.learn(X_obs=X_obs)
+        rebind_info = dict(delete=delete_result, learn=learn_result)
+        return UpdateResult(pcnets=None, log_weights=None, info=rebind_info)
 
     def sample(self, d_batch: int = 1) -> Sample:
         """Select a base model based on its importance weight and sample from that model.

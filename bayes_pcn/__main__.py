@@ -20,6 +20,8 @@ def parse_args():
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--load-path', type=str, default=None)
     parser.add_argument('--wandb-mode', type=str, choices=['online', 'offline'], default='online')
+    parser.add_argument('--dtype', type=str, choices=['float32', 'float64'], default='float32',
+                        help='Use float64 if deletion is needed for numerical stability.')
 
     # model configs
     parser.add_argument('--n-models', type=int, default=2)
@@ -28,6 +30,7 @@ def parse_args():
     parser.add_argument('--sigma-prior', type=float, default=1.)
     parser.add_argument('--sigma-obs', type=float, default=0.1)
     parser.add_argument('--sigma-data', type=float, default=0.01)
+    parser.add_argument('--sigma-forget', type=float, default=0.)
     parser.add_argument('--scale-layer', action='store_true', help='normalize layer activations.')
     parser.add_argument('--act-fn', type=ActFn,
                         default=ActFn.RELU, choices=list(ActFn))
@@ -53,9 +56,9 @@ def parse_args():
                         help='Specifies test dataset configuration.')
     parser.add_argument('--n-data', type=int, default=4)
     parser.add_argument('--n-batch', type=int, default=4)
-    parser.add_argument('--n-epoch', type=int, default=1)
 
     # training configs
+    parser.add_argument('--n-epoch', type=int, default=1)
     parser.add_argument('--weight-lr', type=float, default=0.001)
     parser.add_argument('--activation-lr', type=float, default=0.01)
     parser.add_argument('--activation-optim', choices=['adam', 'sgd'], default='adam')
@@ -77,6 +80,7 @@ def parse_args():
 def setup(args):
     os.makedirs(args.path, exist_ok=True)
     torch.manual_seed(args.seed)
+    torch.set_default_dtype(torch.float32 if args.dtype == 'float32' else torch.float64)
 
 
 def run(train_loader: DataLoader, test_loaders: Dict[str, DataLoader],
@@ -145,7 +149,7 @@ def main():
                           ensemble_log_joint_strat=args.ensemble_log_joint_strat,
                           ensemble_proposal_strat=args.ensemble_proposal_strat,
                           scale_layer=args.scale_layer, resample=args.resample,
-                          weight_lr=args.weight_lr)
+                          weight_lr=args.weight_lr, sigma_forget=args.sigma_forget)
 
     # If load_path is selected, use the current args but on a saved model
     if args.load_path is None:

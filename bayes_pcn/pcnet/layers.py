@@ -4,9 +4,14 @@ import torch.nn.functional as F
 import torch.distributions as dists
 
 from bayes_pcn.const import *
+from bayes_pcn.pcnet.util import assert_positive_definite
 
 
 class AbstractPCLayer(ABC):
+
+    def delete(self, X_obs: torch.Tensor, **kwargs) -> None:
+        assert self._update_strat == LayerUpdateStrat.BAYES
+        self._bayes_delete(X_obs=X_obs, **kwargs)
 
     @abstractmethod
     def log_prob(self, X_obs: torch.Tensor, **kwargs) -> torch.Tensor:
@@ -24,6 +29,9 @@ class AbstractPCLayer(ABC):
         if self._update_strat == LayerUpdateStrat.ML:
             self._ml_update(X_obs=X_obs, **kwargs)
         elif self._update_strat == LayerUpdateStrat.BAYES:
+            sigma_forget = kwargs.pop('sigma_forget', 0.)
+            if sigma_forget > 0.:
+                self._bayes_forget(sigma_forget=sigma_forget)
             self._bayes_update(X_obs=X_obs, **kwargs)
         else:
             raise NotImplementedError()
@@ -37,6 +45,14 @@ class AbstractPCLayer(ABC):
 
     @abstractmethod
     def _bayes_update(self, X_obs: torch.Tensor, **kwargs) -> None:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def _bayes_delete(self, X_obs: torch.Tensor, **kwargs) -> None:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def _bayes_forget(self, sigma_forget: float) -> None:
         raise NotImplementedError()
 
     @property
@@ -110,9 +126,6 @@ class PCLayer(AbstractPCLayer):
         Returns:
             torch.Tensor: Log probability vector of shape <d_batch>.
         """
-        # TODO: Consider normalizing Z_in by 1/sqrt(dim) like transformers
-        # so dimensionality matters less in Z_in U Z_in' (Z_in Z_in' has norm 1)
-        # if they are both normally distributed
         Z_in = self._f(X_in)
         marginal_mean = self.predict(X_in=X_in)  # d_batch x d_out
         log_prob_strat = kwargs.get('log_prob_strat', self._log_prob_strat)
@@ -155,7 +168,6 @@ class PCLayer(AbstractPCLayer):
         return marginal_mean + noise
 
     def _f(self, X_in: torch.Tensor) -> torch.Tensor:
-        # NOTE: Rescale input by 1/sqrt(d)
         if self._act_fn == ActFn.NONE:
             result = X_in
         elif self._act_fn == ActFn.RELU:
@@ -203,6 +215,24 @@ class PCLayer(AbstractPCLayer):
 
         self._R = self._R + Sigma_c_T_Sigma_x_inv.matmul(error)
         self._U = self._U - Sigma_c_T_Sigma_x_inv.matmul(Sigma_c)
+
+    def _bayes_delete(self, X_obs: torch.Tensor, X_in: torch.Tensor) -> None:
+        d_batch = X_obs.shape[0]
+        Z_in = self._f(X_in=X_in)
+
+        Sigma_c = Z_in.matmul(self._U)
+        inv_term_U = Sigma_c.matmul(Z_in.T) - self._Sigma * torch.eye(d_batch).to(self.device)
+        self._U = self._U - Sigma_c.T.matmul(inv_term_U.inverse()).matmul(Sigma_c)
+        assert_positive_definite(matrix=self._U)
+
+        Sigma_c = Z_in.matmul(self._U)
+        inv_term_R = Sigma_c.matmul(Z_in.T) + self._Sigma * torch.eye(d_batch).to(self.device)
+        R_term_1 = torch.eye(self._d_in) + 1/self._Sigma * Sigma_c.T.matmul(Z_in)
+        R_term_2 = self._R - Sigma_c.T.matmul(inv_term_R.inverse()).matmul(X_obs)
+        self._R = R_term_1.matmul(R_term_2)
+
+    def _bayes_forget(self, sigma_forget: float) -> None:
+        self._U = self._U + (sigma_forget ** 2) * torch.eye(self._U.shape[0]).to(self.device)
 
 
 class PCTopLayer(AbstractPCLayer):
@@ -298,3 +328,13 @@ class PCTopLayer(AbstractPCLayer):
 
         self._R = mu_posterior
         self._U = Sigma_posterior
+
+    def _bayes_delete(self, X_obs: torch.Tensor, **kwargs) -> None:
+        d_batch = X_obs.shape[0]
+        Sigma_posterior = self._U
+        self._U = (1/self._U - d_batch/self._Sigma) ** -1
+        self._R = self._U[0, 0]/Sigma_posterior[0, 0] * self._R\
+            - self._U[0, 0]/self._Sigma * X_obs.mean(dim=0)
+
+    def _bayes_forget(self, sigma_forget: float) -> None:
+        self._U = self._U + (sigma_forget ** 2) * torch.eye(self._U.shape[0]).to(self.device)

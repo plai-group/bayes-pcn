@@ -64,6 +64,17 @@ class PCNet:
             lower_activation = a_group.get_acts(layer_index=i, detach=True)
             layer.update(X_obs=lower_activation, X_in=upper_activation, **kwargs)
 
+    def delete_from_weights(self, a_group: ActivationGroup, **kwargs) -> None:
+        """Delete a_group from all layer weights.
+
+        Args:
+            a_group (ActivationGroup): Activation values for all layers.
+        """
+        for i, layer in enumerate(self.layers):
+            upper_activation = a_group.get_acts(layer_index=i+1, detach=True)
+            lower_activation = a_group.get_acts(layer_index=i, detach=True)
+            layer.delete(X_obs=lower_activation, X_in=upper_activation, **kwargs)
+
     def _init_layers(self, n_layers: int, x_dim: int, d_h: int, sigma_prior: float,
                      sigma_obs: float, sigma_data: float, act_fn: ActFn, scale_layer: bool,
                      **kwargs) -> List[AbstractPCLayer]:

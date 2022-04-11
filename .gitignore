@@ -2,5 +2,6 @@
 data
 env
 runs
+test.py
 **/__pycache__
 wandb

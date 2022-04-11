@@ -13,7 +13,7 @@ from .util import *
 class AbstractUpdater(ABC):
     def __init__(self, activation_init_fn: Callable[[torch.Tensor], ActivationGroup],
                  infer_lr: float, infer_T: int, proposal_strat: EnsembleProposalStrat,
-                 n_proposal_samples: int, activation_optim: str, resample: bool = False,
+                 n_proposal_samples: int, activation_optim: str,
                  ensemble_log_joint: Callable[[ActivationGroup], torch.Tensor] = None,
                  **kwargs) -> None:
         self._activation_init_fn: Callable[[torch.Tensor], ActivationGroup] = activation_init_fn
@@ -23,7 +23,6 @@ class AbstractUpdater(ABC):
         self._proposal_strat = proposal_strat
         self._n_proposal_samples = n_proposal_samples
         self._shared_log_joint = ensemble_log_joint is not None
-        self._resample = resample
         self._ensemble_log_joint = ensemble_log_joint
 
     @abstractmethod
@@ -43,11 +42,11 @@ class AbstractUpdater(ABC):
 class MLUpdater(AbstractUpdater):
     def __init__(self, activation_init_fn: Callable[[torch.Tensor], ActivationGroup],
                  infer_lr: float, infer_T: int, proposal_strat: EnsembleProposalStrat,
-                 n_proposal_samples: int, activation_optim: str, resample: bool = False,
+                 n_proposal_samples: int, activation_optim: str,
                  ensemble_log_joint: Callable[[ActivationGroup], torch.Tensor] = None,
                  **kwargs) -> None:
         super().__init__(activation_init_fn, infer_lr, infer_T, proposal_strat, n_proposal_samples,
-                         activation_optim, resample, ensemble_log_joint, **kwargs)
+                         activation_optim, ensemble_log_joint, **kwargs)
         self._weight_lr = kwargs.get('weight_lr', None)
 
     def __call__(self, X_obs: torch.Tensor, pcnets: List[PCNet], log_weights: torch.Tensor,
@@ -69,7 +68,30 @@ class MLUpdater(AbstractUpdater):
         return UpdateResult(pcnets=pcnets, log_weights=log_weights, info=info)
 
 
+class LinearGaussianUpdater(AbstractUpdater):
+    """TODO: Implement this class which gives 'perfect update' to network weights when
+    there is no non-linearity. This could be done by only updating the top layer weights and
+    using MAP log joint evaluation for the bottom layer only.
+
+    Args:
+        AbstractUpdater (_type_): _description_
+    """
+    def __call__(self, X_obs: torch.Tensor, pcnets: List[PCNet], log_weights: torch.Tensor,
+                 **kwargs) -> UpdateResult:
+        return super().__call__(X_obs, pcnets, log_weights, **kwargs)
+
+
 class AbstractVLBUpdater(AbstractUpdater):
+    def __init__(self, activation_init_fn: Callable[[torch.Tensor], ActivationGroup],
+                 infer_lr: float, infer_T: int, proposal_strat: EnsembleProposalStrat,
+                 n_proposal_samples: int, activation_optim: str,
+                 ensemble_log_joint: Callable[[ActivationGroup], torch.Tensor] = None,
+                 **kwargs) -> None:
+        super().__init__(activation_init_fn, infer_lr, infer_T, proposal_strat, n_proposal_samples,
+                         activation_optim, ensemble_log_joint, **kwargs)
+        self._resample = kwargs.get('resample', False)
+        self._sigma_forget = kwargs.get('sigma_forget', 0.)
+
     def __call__(self, X_obs: torch.Tensor, pcnets: List[PCNet], log_weights: torch.Tensor,
                  **kwargs) -> UpdateResult:
         """Perform a conjugate Bayes update on all PCNet parameters using either the recovered mode
@@ -81,21 +103,20 @@ class AbstractVLBUpdater(AbstractUpdater):
         fit_sample_args = dict(X_obs=X_obs, n_samples=n_samples)
         if self._shared_log_joint:
             fit_sample_args['log_joint_fn'] = self._ensemble_log_joint
+            fit_sample_args['sample_weight_log_joint_fns'] = [pcnet.log_joint for pcnet in pcnets]
             output = self._fit_sample_proposal(**fit_sample_args)
             a_groups_all = output[0] * len(pcnets)
-            log_sample_weights = [output[1]] * len(pcnets)
+            log_sample_weights = output[1]  # <(model x samples) x batch>
             stats = [output[2]] * len(pcnets)
         else:
-            a_groups_all = []
-            log_sample_weights = []
-            stats = []
+            a_groups_all, log_sample_weights, stats = [], [], []
             for pcnet in pcnets:
                 fit_sample_args['log_joint_fn'] = pcnet.log_joint
                 output = self._fit_sample_proposal(**fit_sample_args)
                 a_groups_all.extend(output[0])
                 log_sample_weights.append(output[1])
                 stats.append(output[2])
-            log_sample_weights = torch.cat(log_sample_weights, dim=1)
+            log_sample_weights = torch.cat(log_sample_weights, dim=0)  # <(model x samples) x batch>
 
         # Update PCNets and log weights.
         new_pcnets = []
@@ -106,10 +127,10 @@ class AbstractVLBUpdater(AbstractUpdater):
             a_groups_model = a_groups_all[i:i+n_samples]
             log_sample_weights_model = log_sample_weights[i:i+n_samples]
             stat_model = stats[i]
-            j = i
+            j = i * n_samples
             for a_group, log_sample_weight in zip(a_groups_model, log_sample_weights_model):
                 new_pcnet = deepcopy(pcnet)
-                new_pcnet.update_weights(a_group=a_group)
+                new_pcnet.update_weights(a_group=a_group, sigma_forget=self._sigma_forget)
                 new_pcnets.append(new_pcnet)
                 new_log_weight = log_weight_model + log_sample_weight.sum()
                 new_log_weights.append(new_log_weight)
@@ -120,10 +141,10 @@ class AbstractVLBUpdater(AbstractUpdater):
         # HACK: renormalize again to correct numerical error
         new_log_weights = new_log_weights - torch.logsumexp(new_log_weights, dim=-1)
 
-        # TODO: Optionally perform ESS resampling step here, modifying both pcnets and log_weights
+        # Optionally perform ESS resampling step here, modifying both pcnets and log_weights
         if self._resample:
             new_pcnets, new_log_weights = ess_resample(objs=new_pcnets, log_weights=new_log_weights,
-                                                       ess_thresh=0.5)
+                                                       ess_thresh=0.5, n_selected=len(pcnets))
         return UpdateResult(pcnets=new_pcnets, log_weights=new_log_weights, info=fit_info)
 
     @abstractmethod
@@ -133,12 +154,12 @@ class AbstractVLBUpdater(AbstractUpdater):
 
     def _fit_sample_proposal(self, X_obs: torch.Tensor, n_samples: int,
                              log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
-                             ) -> Tuple[List[ActivationGroup], torch.Tensor, List[Any]]:
+                             **kwargs) -> Tuple[List[ActivationGroup], torch.Tensor, List[Any]]:
         proposal, fit_info = self._fit_proposal(log_joint_fn=log_joint_fn, X_obs=X_obs)
         samples = [proposal.sample() for _ in range(n_samples)]
         log_sample_weight = self._log_sample_weight_unnorm(a_groups=samples,
                                                            log_joint_fn=log_joint_fn,
-                                                           proposal_fn=proposal.log_prob)
+                                                           proposal_fn=proposal.log_prob, **kwargs)
         return samples, log_sample_weight, fit_info
 
     def _fit_proposal(self, log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
@@ -154,8 +175,8 @@ class AbstractVLBUpdater(AbstractUpdater):
 
     def _log_sample_weight_unnorm(self, a_groups: List[ActivationGroup],
                                   log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
-                                  proposal_fn: Callable[[ActivationGroup], torch.Tensor]
-                                  ) -> torch.Tensor:
+                                  proposal_fn: Callable[[ActivationGroup], torch.Tensor],
+                                  **kwargs) -> torch.Tensor:
         """Returns an unnormalized sample log weight matrix of shape <d_batch x n_samples>.
 
         Args:
@@ -166,17 +187,24 @@ class AbstractVLBUpdater(AbstractUpdater):
         Returns:
             torch.Tensor: _description_
         """
+        log_joint_fns = kwargs.get('sample_weight_log_joint_fns', [log_joint_fn])
         with torch.no_grad():
             all_log_weights = []
             for a_group in a_groups:
-                log_weights = log_joint_fn(a_group) - proposal_fn(a_group)
-                all_log_weights.append(log_weights)
-
+                log_weights = []
+                for log_joint_fn in log_joint_fns:
+                    model_log_weights = log_joint_fn(a_group) - proposal_fn(a_group)
+                    log_weights.append(model_log_weights)
+                if len(log_weights) == 1:
+                    log_weights = log_weights[0].unsqueeze(0)
+                else:
+                    log_weights = torch.stack(log_weights, dim=0)
+                all_log_weights.append(log_weights)  # <n_models x d_batch>
             if len(all_log_weights) == 1:
-                log_weights = all_log_weights[0].unsqueeze(1)
+                log_weights = all_log_weights[0]
             else:
-                log_weights = torch.cat(all_log_weights, dim=1)  # <d_batch x n_samples>
-            return log_weights
+                log_weights = torch.cat(all_log_weights, dim=0)
+            return log_weights  # <(n_models x n_samples) x d_batch>
 
 
 class VLBModeUpdater(AbstractVLBUpdater):
@@ -208,7 +236,7 @@ class VLBFullUpdater(AbstractVLBUpdater):
 
     def _build_proposal(self, log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
                         a_group: ActivationGroup) -> BaseDistribution:
-        # FIXME: This will throw exceptions if even one Hessian isn't invertible
+        # FIXME: Right now, if Hessian is not invertible we just take the diagonal (refer to MVN)
         # NOTE: We must be close to convergence for the Hessian to be invertible
         mean_vectors = []
         precision_matrices = []

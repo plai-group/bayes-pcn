@@ -3,41 +3,41 @@ method: grid
 parameters:
   seed:
     value: 0
-  n_models:
+  n-models:
     values: [1, 4]
-  n_layers:
+  n-layers:
     values: [2, 4]
-  h_dim:
+  h-dim:
     value: 256
-  sigma_prior:
-    value: 1.
-  sigma_obs:
+  sigma-prior:
+    values: [1., 0.1]
+  sigma-obs:
     value: 0.1
-  sigma_data:
-    value: 0.01
-  act_fn:
-    value: "relu"
-  layer_log_prob_strat:
-    value: "p_pred"
-  layer_sample_strat:
+  sigma-data:
+    values: [0.1, 0.01]
+  act-fn:
+    values: ["none", "relu", "gelu"]
+  layer-log-prob-strat:
+    values: ["map", "p_pred"]
+  layer-sample-strat:
     value: "map"
-  layer_update_strat:
+  layer-update-strat:
     value: "bayes"
-  ensemble_log_joint_strat:
+  ensemble-log-joint-strat:
     value: "shared"
-  ensemble_proposal_strat:
+  ensemble-proposal-strat:
     values: ["mode", "full"]
   dataset:
     value: "cifar10"
-  dataset_mode:
-    value: "mask"
-  n_data:
-    values: [128, 256]
-  n_batch:
+  dataset-mode:
+    values: ["white", "mask"]
+  n-data:
+    values: [128]
+  n-batch:
+    values: [1, 32]
+  n-epoch:
     value: 1
-  n_epoch:
-    value: 1
-  activation_lr:
+  activation-lr:
     values: [0.01, 0.005]
-  T_infer:
-    value: 500
+  T-infer:
+    value: 1000
