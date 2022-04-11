@@ -104,6 +104,7 @@ class PCNetEnsemble:
                                              infer_T=self._updater.infer_T,
                                              fixed_indices=fixed_indices,
                                              activation_optim=self._activation_optim)
+            obs_info = None
             if not fixed_indices_exists(fixed_indices=fixed_indices):
                 # Update obs layer while fixing hidden layers
                 a_group.clamp(obs=False, hidden=True)
