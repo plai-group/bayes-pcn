@@ -19,7 +19,7 @@ class PCNet:
         self.layer_update_strat = None
         self.device = torch.device('cpu')
 
-    def sample(self, d_batch: int = 1) -> Tuple[torch.Tensor, ActivationGroup]:
+    def sample(self, d_batch: int = 1, **kwargs) -> Tuple[torch.Tensor, ActivationGroup]:
         """Sample observations from the model via ancestral sampling.
 
         Args:
@@ -31,8 +31,11 @@ class PCNet:
         """
         result = None
         traces = []
-        for layer in reversed(self.layers):
-            result = layer.sample(d_batch=d_batch, X_in=result)
+        for i, layer in enumerate(reversed(self.layers)):
+            sample_args = dict(d_batch=d_batch, X_in=result)
+            if i == len(self.layers) - 1:
+                sample_args['X_obs'] = kwargs.get('X_obs', None)
+            result = layer.sample(**sample_args)
             traces.append(result)
         return result, ActivationGroup(activations=traces[::-1])
 
@@ -79,12 +82,14 @@ class PCNet:
                      sigma_obs: float, sigma_data: float, act_fn: ActFn, scale_layer: bool,
                      **kwargs) -> List[AbstractPCLayer]:
         sigma_obs_l0 = sigma_obs if sigma_data is None else sigma_data
-        layers = [PCLayer(d_in=d_h, d_out=x_dim, act_fn=act_fn, scale_layer=scale_layer,
-                          sigma_prior=sigma_prior, sigma_obs=sigma_obs_l0, **kwargs)]
-        for _ in range(n_layers-2):
+        layers = [PCLayer(d_in=d_h, d_out=x_dim, act_fn=act_fn, sigma_prior=sigma_prior,
+                          sigma_obs=sigma_obs_l0, scale_layer=scale_layer, layer_index=0, **kwargs)]
+        for i in range(1, n_layers-1):
             layers.append(PCLayer(d_in=d_h, d_out=d_h, act_fn=act_fn, scale_layer=scale_layer,
-                                  sigma_prior=sigma_prior, sigma_obs=sigma_obs, **kwargs))
-        layers.append(PCTopLayer(d_out=d_h, sigma_prior=sigma_prior, sigma_obs=sigma_obs, **kwargs))
+                                  sigma_prior=sigma_prior, sigma_obs=sigma_obs, layer_index=i,
+                                  **kwargs))
+        layers.append(PCTopLayer(d_out=d_h, sigma_prior=sigma_prior, sigma_obs=sigma_obs,
+                                 layer_index=n_layers-1, **kwargs))
         return layers
 
     @property

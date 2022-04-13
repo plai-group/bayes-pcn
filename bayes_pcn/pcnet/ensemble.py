@@ -1,3 +1,4 @@
+import pyro
 import random
 import torch
 from typing import List
@@ -39,7 +40,7 @@ class PCNetEnsemble:
                                             ensemble_proposal_strat)
         self.device: torch.device = torch.device('cpu')
 
-        update_fn_args = dict(activation_init_fn=self._initialize_activation_group,
+        update_fn_args = dict(activation_init_fn=self.initialize_activation_group,
                               proposal_strat=self.ensemble_proposal_strat,
                               infer_lr=infer_lr, infer_T=infer_T,
                               n_proposal_samples=n_proposal_samples,
@@ -75,7 +76,7 @@ class PCNetEnsemble:
         X_obs = X_obs.to(self.device)
         if fixed_indices_exists(fixed_indices=fixed_indices):
             fixed_indices = fixed_indices.to(self.device)
-        a_group = self._initialize_activation_group(X_obs=X_obs)
+        a_group = self.initialize_activation_group(X_obs=X_obs)
 
         # Update hidden layer while fixing obs layer
         a_group.clamp(obs=True, hidden=False)
@@ -91,12 +92,12 @@ class PCNetEnsemble:
         X_obs = X_obs.to(self.device)
         if fixed_indices_exists(fixed_indices=fixed_indices):
             fixed_indices = fixed_indices.to(self.device)
-        a_group = self._initialize_activation_group(X_obs=X_obs)
+        a_group = self.initialize_activation_group(X_obs=X_obs)
 
         infer_info = dict()
         for n in range(1, n_repeat+1):
             data_acts = a_group.get_acts(layer_index=0, detach=True)
-            a_group = self._initialize_activation_group(X_obs=data_acts)
+            a_group = self.initialize_activation_group(X_obs=data_acts)
             # Update hidden layer while fixing obs layer
             a_group.clamp(obs=True, hidden=False)
             hidden_info = maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
@@ -118,6 +119,21 @@ class PCNetEnsemble:
         X_pred = a_group.get_acts(layer_index=0, detach=True).to(original_device)
         return Prediction(data=X_pred, a_group=a_group, info=infer_info)
 
+    def initialize_activation_group(self, X_obs: torch.Tensor) -> ActivationGroup:
+        d_batch = X_obs.shape[0]
+        activations = [deepcopy(X_obs)]
+        if self.activation_init_strat == ActInitStrat.FIXED:
+            for _ in range(self._n_layers-1):
+                activations.append(torch.ones(d_batch, self._h_dim).to(self.device))
+        elif self.activation_init_strat == ActInitStrat.RANDN:
+            for _ in range(self._n_layers-1):
+                activations.append(torch.randn(d_batch, self._h_dim).to(self.device))
+        elif self.activation_init_strat == ActInitStrat.SAMPLE:
+            raise NotImplementedError()
+        else:
+            raise NotImplementedError()
+        return ActivationGroup(activations=activations)
+
     def learn(self, X_obs: torch.Tensor) -> UpdateResult:
         X_obs = X_obs.to(self.device)
         updater_args = dict(X_obs=X_obs, pcnets=self._pcnets, log_weights=self._log_weights)
@@ -137,11 +153,12 @@ class PCNetEnsemble:
         rebind_info = dict(delete=delete_result, learn=learn_result)
         return UpdateResult(pcnets=None, log_weights=None, info=rebind_info)
 
-    def sample(self, d_batch: int = 1) -> Sample:
+    def sample(self, d_batch: int = 1, a_group: ActivationGroup = None) -> Sample:
         """Select a base model based on its importance weight and sample from that model.
 
         Args:
             d_batch (int, optional): Number of datapoints to sample. Defaults to 1.
+            a_group (ActivationGroup, optional): Only used in Gibbs sampling. Defaults to None.
 
         Returns:
             (Sample): Sample object with <d_batch x x_dim> data and <d_batch> log joint tensors.
@@ -152,7 +169,8 @@ class PCNetEnsemble:
         indices, counts = model_indices.unique(return_counts=True)
         for index, count in zip(indices.tolist(), counts.tolist()):
             if count > 0:
-                sample, a_group = self._pcnets[index].sample(d_batch=count)
+                X_obs = None if a_group is None else a_group.get_acts(layer_index=0, detach=True)
+                sample, a_group = self._pcnets[index].sample(d_batch=count, X_obs=X_obs)
                 info.append((sample, a_group))
 
         random.shuffle(info)
@@ -166,21 +184,6 @@ class PCNetEnsemble:
                       sigma_prior=self._sigma_prior, sigma_obs=self._sigma_obs,
                       sigma_data=self._sigma_data, act_fn=act_fn, scale_layer=self._scale_layer)
                 for _ in range(n_models)]
-
-    def _initialize_activation_group(self, X_obs: torch.Tensor) -> ActivationGroup:
-        d_batch = X_obs.shape[0]
-        activations = [deepcopy(X_obs)]
-        if self.activation_init_strat == ActInitStrat.FIXED:
-            for _ in range(self._n_layers-1):
-                activations.append(torch.ones(d_batch, self._h_dim).to(self.device))
-        elif self.activation_init_strat == ActInitStrat.RANDN:
-            for _ in range(self._n_layers-1):
-                activations.append(torch.randn(d_batch, self._h_dim).to(self.device))
-        elif self.activation_init_strat == ActInitStrat.SAMPLE:
-            raise NotImplementedError()
-        else:
-            raise NotImplementedError()
-        return ActivationGroup(activations=activations)
 
     @property
     def device(self):
@@ -228,3 +231,41 @@ class PCNetEnsemble:
         self._layer_sample_strat = value
         for pcnet in self._pcnets:
             pcnet.layer_sample_strat = value
+
+    def sample_weights(self) -> List[torch.Tensor]:
+        # For each layer in the PCNet, sample from normal / matrix normal
+        assert len(self._pcnets) == 1
+        layer_weights = []
+        pcnet = self._pcnets[0]
+        for layer in pcnet.layers:
+            weights = layer.sample_weights()
+            layer_weights.append(weights)
+        return layer_weights
+
+    def fix_weights(self, layer_weights: List[torch.Tensor]) -> None:
+        assert len(self._pcnets) == 1
+        pcnet = self._pcnets[0]
+        for layer, weights in zip(pcnet.layers, layer_weights):
+            layer.fix_weights(weights=weights)
+
+
+class PCNetPosterior:
+    """Container class for batched Gibbs sampling learned PCNetEnsemble.
+    All PCNetEnsemble must contain a single PCNet.
+    """
+    def __init__(self, ensembles: List[PCNetEnsemble]) -> None:
+        for ensemble in ensembles:
+            assert len(ensemble._pcnets) == 1
+        self.ensembles = ensembles
+
+    def get_member(self, index: int) -> PCNetEnsemble:
+        return self.ensembles[index]
+
+    def sample(self):
+        pcnet_probs = torch.ones(len(self.ensembles)) / len(self.ensembles)
+        pcnet = self.get_member(torch.multinomial(pcnet_probs, num_samples=1).item())
+        return pcnet.sample()
+
+    def to(self, device: torch.device):
+        for pcnet in self.ensembles:
+            pcnet.device = device

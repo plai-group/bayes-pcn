@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 import torch
 import torch.nn.functional as F
 import torch.distributions as dists
+import pyro
+import pyro.distributions as pdists
 
 from bayes_pcn.const import *
 from bayes_pcn.pcnet.util import assert_positive_definite
@@ -90,14 +92,23 @@ class AbstractPCLayer(ABC):
     def update_strat(self, value: LayerUpdateStrat):
         self._update_strat = value
 
+    @abstractmethod
+    def sample_weights(self) -> torch.Tensor:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def fix_weights(self, weights: torch.Tensor):
+        raise NotImplementedError()
+
 
 class PCLayer(AbstractPCLayer):
     """Maps upper layer output x_{l+1} to current layer output prediction x_{l}^
     Responsible for training weights responsible for this particular layer.
     """
 
-    def __init__(self, d_in: int, d_out: int, sigma_prior: float, sigma_obs: float,
-                 act_fn: ActFn, **kwargs) -> None:
+    def __init__(self, layer_index: int, d_in: int, d_out: int, sigma_prior: float,
+                 sigma_obs: float, act_fn: ActFn, **kwargs) -> None:
+        self._name = f"layer_{layer_index}"
         self._d_in = d_in
         self._d_out = d_out
         self._log_prob_strat: LayerLogProbStrat = None
@@ -154,18 +165,18 @@ class PCLayer(AbstractPCLayer):
             torch.Tensor: Sampled lower layer neuron values of shape <d_batch x d_out>.
         """
         d_batch = X_in.shape[0]
-        marginal_mean = self.predict(X_in=X_in)
-        white_noise = torch.randn(d_batch, self._d_out).to(self.device)
-
-        if self._sample_strat == LayerSampleStrat.MAP:
-            noise = (self._Sigma ** 0.5) * white_noise
-        elif self._sample_strat == LayerSampleStrat.P_PRED:
-            Z_in = self._f(X_in)
-            marginal_Sigma = self._Sigma + Z_in.matmul(self._U).matmul(Z_in.T).diag()
-            noise = (marginal_Sigma ** 0.5).unsqueeze(-1) * white_noise
-        else:
-            raise NotImplementedError()
-        return marginal_mean + noise
+        with pyro.plate(f"plate_{self._name}", size=d_batch, dim=-2):
+            marginal_mean = self.predict(X_in=X_in)
+            if self._sample_strat == LayerSampleStrat.MAP:
+                marginal_Sigma = self._Sigma
+            elif self._sample_strat == LayerSampleStrat.P_PRED:
+                Z_in = self._f(X_in)
+                marginal_Sigma = self._Sigma + Z_in.matmul(self._U).matmul(Z_in.T).diag()
+                marginal_Sigma = marginal_Sigma.unsqueeze(-1)
+            else:
+                raise NotImplementedError()
+            dist = pdists.Normal(marginal_mean, marginal_Sigma ** 0.5)
+            return pyro.sample(self._name, dist, obs=kwargs.get('X_obs', None))
 
     def _f(self, X_in: torch.Tensor) -> torch.Tensor:
         if self._act_fn == ActFn.NONE:
@@ -234,9 +245,18 @@ class PCLayer(AbstractPCLayer):
     def _bayes_forget(self, sigma_forget: float) -> None:
         self._U = self._U + (sigma_forget ** 2) * torch.eye(self._U.shape[0]).to(self.device)
 
+    def sample_weights(self) -> torch.Tensor:
+        L = torch.linalg.cholesky(self._U)
+        return self._R + L.matmul(torch.randn_like(self._R))
+
+    def fix_weights(self, weights: torch.Tensor):
+        self._R = weights
+
 
 class PCTopLayer(AbstractPCLayer):
-    def __init__(self, d_out: int, sigma_prior: float, sigma_obs: float, **kwargs) -> None:
+    def __init__(self, layer_index: int, d_out: int, sigma_prior: float,
+                 sigma_obs: float, **kwargs) -> None:
+        self._name = f"layer_{layer_index}"
         self._d_out = d_out
         self._log_prob_strat: LayerLogProbStrat = None
         self._sample_strat: LayerSampleStrat = None
@@ -286,17 +306,17 @@ class PCTopLayer(AbstractPCLayer):
         Returns:
             torch.Tensor: Sampled lower layer neuron values of shape <d_batch x d_out>.
         """
-        mean = self.predict(**kwargs)
-        d_batch = mean.shape[0]
-        white_noise = torch.randn(d_batch, self._d_out).to(self.device)
-
-        if self._sample_strat == LayerSampleStrat.MAP:
-            noise = (self._Sigma ** 0.5) * white_noise
-        elif self._sample_strat == LayerSampleStrat.P_PRED:
-            noise = ((self._Sigma + self._U[0, 0]) ** 0.5) * white_noise
-        else:
-            return NotImplementedError()
-        return mean + noise
+        marginal_mean = self.predict(**kwargs)
+        d_batch = marginal_mean.shape[0]
+        with pyro.plate(f"plate_{self._name}", size=d_batch, dim=-2):
+            if self._sample_strat == LayerSampleStrat.MAP:
+                marginal_Sigma = self._Sigma
+            elif self._sample_strat == LayerSampleStrat.P_PRED:
+                marginal_Sigma = self._Sigma + self._U[0, 0]
+            else:
+                raise NotImplementedError()
+            dist = pdists.Normal(marginal_mean, marginal_Sigma ** 0.5)
+            return pyro.sample(self._name, dist)
 
     def _ml_update(self, X_obs: torch.Tensor, **kwargs) -> None:
         """Take a gradient step for the network parameters self._R. The gradient is
@@ -338,3 +358,10 @@ class PCTopLayer(AbstractPCLayer):
 
     def _bayes_forget(self, sigma_forget: float) -> None:
         self._U = self._U + (sigma_forget ** 2) * torch.eye(self._U.shape[0]).to(self.device)
+
+    def sample_weights(self) -> torch.Tensor:
+        L = torch.linalg.cholesky(self._U)
+        return self._R + L.matmul(torch.randn_like(self._R))
+
+    def fix_weights(self, weights: torch.Tensor):
+        self._R = weights

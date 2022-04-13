@@ -1,0 +1,49 @@
+program: -mbayes_pcn.gibbs
+method: grid
+parameters:
+  T-gibbs:
+    value: 1000
+  T-mh:
+    value: 100
+  mh-step-size:
+    values: [0.001, 0.0005, 0.0001]
+  gibbs-burnin:
+    value: 100
+  seed:
+    value: 0
+  n-models:
+    value: 1
+  n-layers:
+    values: [2, 4]
+  h-dim:
+    value: 128
+  sigma-prior:
+    value: 0.25
+  sigma-obs:
+    value: 0.1
+  sigma-data:
+    value: 0.1
+  act-fn:
+    values: ["none", "relu", "gelu"]
+  layer-log-prob-strat:
+    value: "map"
+  layer-sample-strat:
+    value: "map"
+  layer-update-strat:
+    value: "bayes"
+  ensemble-log-joint-strat:
+    value: "shared"
+  ensemble-proposal-strat:
+    value: "full"
+  dataset:
+    value: "cifar10"
+  dataset-mode:
+    value: "mask"
+  n-data:
+    value: 4
+  n-batch:
+    value: 4
+  activation-lr:
+    value: 0.005
+  T-infer:
+    value: 1000

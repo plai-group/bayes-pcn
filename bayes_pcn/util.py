@@ -7,6 +7,7 @@ import pickle
 from PIL import Image
 import torch
 import torchvision
+import wandb
 
 from copy import deepcopy
 
@@ -41,12 +42,14 @@ def imshow(img):
     plt.show()
 
 
-def fig2img(fig):
+def fig2img(fig, caption: str) -> wandb.Image:
     """Convert a Matplotlib figure to a PIL Image and return it"""
     buf = io.BytesIO()
     fig.savefig(buf)
     buf.seek(0)
-    img = Image.open(buf)
+    pil_img = Image.open(buf)
+    img = wandb.Image(pil_img, caption=caption)
+    pil_img.close()
     return img
 
 

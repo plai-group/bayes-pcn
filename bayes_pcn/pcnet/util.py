@@ -10,6 +10,9 @@ class ActivationGroup:
     def __init__(self, activations: List[torch.Tensor], from_concatenated: bool = False) -> None:
         """Contains all layer-wise activations of PCNets within PCNetEnsemble. Makes things
         easier to work with PyTorch optimizers. Does not modify bottom-most activations.
+        NOTE: This method modifies contents of activations in place.
+        NOTE: Layer activations are not parameters if from_concatenated is not true to
+            have the method work with torch.autograd.hessian.
 
         Args:
             activations (List[torch.Tensor]): A list of PCNetEnsemble activations.
@@ -122,8 +125,7 @@ class ActivationGroup:
     @device.setter
     def device(self, device: torch.device):
         self._device = device
-        if self._original_obs:
-            self._original_obs.to(device)
+        if self._original_obs is not None:
             self._original_obs = self._original_obs.to(device)
         for i in range(len(self._data)):
             self._data[i] = self._data[i].to(device)
@@ -222,7 +224,7 @@ class MVN(BaseDistribution):
 def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
                        a_group: ActivationGroup, infer_T: int, infer_lr: float,
                        activation_optim: str, fixed_indices: torch.Tensor = None,
-                       **kwargs) -> List[float]:
+                       **kwargs) -> Dict[str, List[float]]:
     """Move in the space of activation vectors to minimize log joint under the model.
     a_group is modified in place. To clarify, the model is defined by its log_joint_fn.
     Depending on what part of a_group is 'clamped' or not updated by gradient descent,
@@ -240,7 +242,7 @@ def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
             denotes which observation neuron indices to prevent modification. Defaults to None.
 
     Returns:
-        List[float]: A list of mean batch loss over time.
+        List[float]: A dictionary with mean, min, and max batch loss over time.
     """
     mean_losses = []
     min_losses = []

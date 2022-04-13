@@ -131,8 +131,9 @@ def plot_update_energy(update_result: UpdateResult, caption: str = None) -> wand
         ax_obj.plot(x, all_min_losses[i], 'b--')
         ax_obj.plot(x, all_max_losses[i], 'b--')
     fig.tight_layout()
-    img = fig2img(fig=fig)
-    return wandb.Image(img, caption=caption)
+    img = fig2img(fig=fig, caption=caption)
+    plt.close(fig)
+    return img
 
 
 def generate_samples(model: PCNetEnsemble, X_shape: torch.Size, d_batch: int,

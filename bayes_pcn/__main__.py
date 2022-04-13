@@ -13,7 +13,7 @@ from .pcnet import PCNetEnsemble
 from .trainer import train_epoch, score_epoch
 
 
-def parse_args():
+def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     # general configs
     parser.add_argument('--path', type=str, default=None)
@@ -22,6 +22,7 @@ def parse_args():
     parser.add_argument('--wandb-mode', type=str, choices=['online', 'offline'], default='online')
     parser.add_argument('--dtype', type=str, choices=['float32', 'float64'], default='float32',
                         help='Use float64 if deletion is needed for numerical stability.')
+    parser.add_argument('--cuda', action='store_true', help='Use GPU if available.')
 
     # model configs
     parser.add_argument('--n-models', type=int, default=2)
@@ -73,14 +74,30 @@ def parse_args():
     parser.add_argument('--log-every', type=int, default=1, help="Log every this # of iterations")
     parser.add_argument('--plot-every', type=int, default=1, help="Plot every this # of iterations")
     parser.add_argument('--save-every', type=int, default=1, help="Save every this # of iterations")
-    args = parser.parse_args()
-    return args
+    return parser
 
 
 def setup(args):
     os.makedirs(args.path, exist_ok=True)
     torch.manual_seed(args.seed)
     torch.set_default_dtype(torch.float32 if args.dtype == 'float32' else torch.float64)
+
+
+def model_dispatcher(args: Dict[str, Any], dataset_info: Dict[str, Any]) -> PCNetEnsemble:
+    return PCNetEnsemble(n_models=args.n_models, n_layers=args.n_layers, h_dim=args.h_dim,
+                         x_dim=dataset_info.get('x_dim'), act_fn=args.act_fn, infer_T=args.T_infer,
+                         infer_lr=args.activation_lr, sigma_prior=args.sigma_prior,
+                         sigma_obs=args.sigma_obs, sigma_data=args.sigma_data,
+                         n_proposal_samples=args.n_proposal_samples,
+                         activation_optim=args.activation_optim,
+                         activation_init_strat=args.activation_init_strat,
+                         layer_log_prob_strat=args.layer_log_prob_strat,
+                         layer_sample_strat=args.layer_sample_strat,
+                         layer_update_strat=args.layer_update_strat,
+                         ensemble_log_joint_strat=args.ensemble_log_joint_strat,
+                         ensemble_proposal_strat=args.ensemble_proposal_strat,
+                         scale_layer=args.scale_layer, resample=args.resample,
+                         weight_lr=args.weight_lr, sigma_forget=args.sigma_forget)
 
 
 def run(train_loader: DataLoader, test_loaders: Dict[str, DataLoader],
@@ -121,8 +138,28 @@ def run(train_loader: DataLoader, test_loaders: Dict[str, DataLoader],
     return results_dict
 
 
+"""
+AM via PCN Paper
+
+2 layer net: T (time) in {12, 16, 24, 32}
+Multi layer net: T in {32, 48, 72}
+
+Data size in {100, 250, 500, 750, 1000}
+hidden layer width in {256, 512, 1024, 2048}
+gamma (learning rate for activations) in {1, 0.5, 0.1, 0.05, 0.01}
+alpha (learning rate for weights) in {0.0001, 0.00005}
+
+Model Detail: PyTorch initialization + ReLU activations
+Corrupt Image Retrieval
+- Iteration function F 30 times, using T in {100, 250, 500}
+
+Weird Good Behaviour:
+- h: 256, data: 100, gamma: 0.00001, T: 10000
+"""
+
+
 def main():
-    args = parse_args()
+    args = get_parser().parse_args()
     os.environ["WANDB_MODE"] = args.wandb_mode
     wandb.init(project="bayes_pcn", entity="jasonyoo", config=args)
     wandb.define_metric("iteration/step")
@@ -135,29 +172,16 @@ def main():
     if args.path is None:
         args.path = f'runs/{args.run_name}'
     setup(args)
-    train_loader, test_loaders, dataset_info = dataset_dispatcher(args)
-    model = PCNetEnsemble(n_models=args.n_models, n_layers=args.n_layers, h_dim=args.h_dim,
-                          x_dim=dataset_info.get('x_dim'), act_fn=args.act_fn, infer_T=args.T_infer,
-                          infer_lr=args.activation_lr, sigma_prior=args.sigma_prior,
-                          sigma_obs=args.sigma_obs, sigma_data=args.sigma_data,
-                          n_proposal_samples=args.n_proposal_samples,
-                          activation_optim=args.activation_optim,
-                          activation_init_strat=args.activation_init_strat,
-                          layer_log_prob_strat=args.layer_log_prob_strat,
-                          layer_sample_strat=args.layer_sample_strat,
-                          layer_update_strat=args.layer_update_strat,
-                          ensemble_log_joint_strat=args.ensemble_log_joint_strat,
-                          ensemble_proposal_strat=args.ensemble_proposal_strat,
-                          scale_layer=args.scale_layer, resample=args.resample,
-                          weight_lr=args.weight_lr, sigma_forget=args.sigma_forget)
+    train_loader, test_loaders, dataset_info = dataset_dispatcher(args=args)
+    model = model_dispatcher(args=args, dataset_info=dataset_info)
 
     # If load_path is selected, use the current args but on a saved model
     if args.load_path is None:
         config = (model, args)
     else:
         config = (load_config(args.load_path)[0], args)
-    if torch.cuda.device_count() > 0:
-        model.device = torch.device('cpu')  # torch.device('cuda')
+    if args.cuda and torch.cuda.device_count() > 0:
+        model.device = torch.device('cuda')
 
     result = run(train_loader=train_loader, test_loaders=test_loaders, config=config)
     save_result(result=result, path=f"{args.path}/result.csv")
