@@ -316,7 +316,7 @@ class PCTopLayer(AbstractPCLayer):
             else:
                 raise NotImplementedError()
             dist = pdists.Normal(marginal_mean, marginal_Sigma ** 0.5)
-            return pyro.sample(self._name, dist)
+            return pyro.sample(self._name, dist, obs=kwargs.get('X_obs', None))
 
     def _ml_update(self, X_obs: torch.Tensor, **kwargs) -> None:
         """Take a gradient step for the network parameters self._R. The gradient is

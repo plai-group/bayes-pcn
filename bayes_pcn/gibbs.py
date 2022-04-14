@@ -1,5 +1,6 @@
 from pyro.infer import MCMC, NUTS
 from pyro.infer.mcmc.util import initialize_model, summary
+from statistics import mean
 import torch
 from torch.utils.data import DataLoader
 from typing import Dict, Any, List, Tuple
@@ -113,11 +114,12 @@ def train_gibbs(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
     orig_test_loaders = test_loaders
     model_template = deepcopy(model)
 
-    a_groups, prev_a_groups = [], []
+    prev_a_groups = []
     for epoch in range(T_gibbs):
         # Prepare dataloaders
         train_loader = iter(orig_train_loader)
         test_loaders = {name: iter(test_loader) for name, test_loader in orig_test_loaders.items()}
+        a_groups, update_results = [], []
 
         # Sample hidden activations via NUTS
         for i in range(0, len(train_loader)):
@@ -129,6 +131,7 @@ def train_gibbs(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
                                                                   T_mh=T_mh,
                                                                   mh_step_size=mh_step_size)
             a_groups.append(a_group)
+            update_results.append(update_result)
         prev_a_groups = a_groups
 
         # Sample network weights using conjugate Bayesian updates
@@ -137,11 +140,12 @@ def train_gibbs(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         model.fix_weights(layer_weights=layer_weights)
         models.append(model)
 
+        # Evaluate model recall and log to wandb
         X_shape = data_batch.original_shape
         wandb_dict = {"step": epoch}
         if (i % log_every) == 0:
-            acts_log_joint = sum([model.log_joint(a_group=a_group).sum() for a_group in a_groups])
-            wandb_dict["acts_log_joint"] = acts_log_joint.item()
+            a_group_ljs = [ur.info["model_0"]["mean_losses"][-1] for ur in update_results]
+            wandb_dict["Gibbs -logp(x|W)"] = mean(a_group_ljs)
             result, pred_batch = score_data_batch(data_batch=data_batch, model=model,
                                                   acc_thresh=acc_thresh, n_repeat=n_repeat,
                                                   prefix='current')
@@ -155,8 +159,6 @@ def train_gibbs(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
                                        caption="Model samples via ancestral sampling.")
             log_joint_img = plot_update_energy(update_result=update_result,
                                                caption="NUTS log joint curve (last batch).")
-
-            # Log to wandb
             wandb_dict = {f"iteration/{k}": v for k, v in wandb_dict.items()}
             wandb_dict["Sample Image Denoising"] = sample_img
             wandb_dict["Generated Image"] = gen_img
