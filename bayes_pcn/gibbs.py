@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 from typing import Dict, Any, List, Tuple
 import wandb
 from bayes_pcn.const import LayerLogProbStrat, LayerSampleStrat
+from bayes_pcn.dataset import separate_train_test
 
 from bayes_pcn.pcnet.ensemble import PCNetPosterior, PCNetEnsemble
 from bayes_pcn.__main__ import get_parser, model_dispatcher, setup
@@ -215,17 +216,19 @@ def score_gibbs(train_loader: DataLoader, test_loaders: Dict[str, DataLoader],
     return result_dict
 
 
-def run_gibbs(train_loader: DataLoader, test_loaders: Dict[str, DataLoader],
-              config: Tuple[PCNetEnsemble, Dict[str, Any]]):
+def run_gibbs(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, DataLoader],
+              config: Tuple[PCNetEnsemble, Dict[str, Any]]) -> Dict[str, Any]:
     model, args = config
     results_dict = {'name': [args.run_name], 'seed': [args.seed], 'epoch': [1]}
     acc_thresh = args.recall_threshold
+    learn_train_loader, learn_test_loaders = separate_train_test(loaders=learn_loaders)
+    score_train_loader, score_test_loaders = separate_train_test(loaders=score_loaders)
 
-    ensemble = train_gibbs(train_loader=train_loader, test_loaders=test_loaders,
+    ensemble = train_gibbs(train_loader=learn_train_loader, test_loaders=learn_test_loaders,
                            model=model, log_every=args.log_every, T_gibbs=args.T_gibbs,
                            T_mh=args.T_mh, mh_step_size=args.mh_step_size,
                            gibbs_burnin=args.gibbs_burnin)
-    result_dict = score_gibbs(train_loader=train_loader, test_loaders=test_loaders,
+    result_dict = score_gibbs(train_loader=score_train_loader, test_loaders=score_test_loaders,
                               model=ensemble, acc_thresh=acc_thresh, epoch=1, n_repeat=1)
     results_dict.update(result_dict)
     save_config(config, f'{args.path}/latest.pt')
@@ -252,7 +255,7 @@ def main_gibbs():
     args.run_name = wandb.run.name
 
     setup(args)
-    train_loader, test_loaders, dataset_info = dataset_dispatcher(args)
+    learn_loaders, score_loaders, dataset_info = dataset_dispatcher(args)
     model = model_dispatcher(args=args, dataset_info=dataset_info)
     model.layer_log_prob_strat = LayerLogProbStrat.MAP
     model.layer_sample_strat = LayerSampleStrat.MAP
@@ -265,7 +268,7 @@ def main_gibbs():
     if args.cuda and torch.cuda.device_count() > 0:
         model.device = torch.device('cuda')
 
-    result = run_gibbs(train_loader=train_loader, test_loaders=test_loaders, config=config)
+    result = run_gibbs(learn_loaders=learn_loaders, score_loaders=score_loaders, config=config)
     save_result(result=result, path=f"{args.path}/result.csv")
     wandb.finish()
 

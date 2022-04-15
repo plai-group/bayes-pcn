@@ -1,9 +1,10 @@
 from PIL import Image
 import torch
 import torch.distributions as dists
+from torch.utils.data import DataLoader
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
-from typing import Tuple, Any, Optional, Callable
+from typing import Dict, Tuple, Any, Optional, Callable
 
 
 class PureNoise:
@@ -89,8 +90,11 @@ class CIFAR10Recall(datasets.CIFAR10):
         return img, fixed_indices
 
 
-def cifar10(args):
-    batch_size = args.n_batch
+def cifar10(args) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader], Dict[str, Any]]:
+    data_size = args.n_data
+    learn_batch_size = min(args.n_batch, data_size)
+    score_batch_size = min(args.n_batch_score, data_size)
+    assert (data_size % learn_batch_size) == 0 and (data_size % score_batch_size) == 0
     x_dim = 3 * 32 * 32
 
     config = args.dataset_mode
@@ -124,22 +128,26 @@ def cifar10(args):
     # Initialize train and test dataloaders
     train = CIFAR10Recall(root='./data', train=True, download=True,
                           transform=transform, transform_post=transform_post)
-    train = torch.utils.data.Subset(train, range(args.n_data))
-    train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size, shuffle=False,
-                                               drop_last=True, num_workers=4)
-    tests, test_loaders = [], {}
+    train = torch.utils.data.Subset(train, range(data_size))
+    tests = []
+    learn_loaders = dict(train=DataLoader(train, batch_size=learn_batch_size, shuffle=False))
+    score_loaders = dict(train=DataLoader(train, batch_size=score_batch_size, shuffle=False))
     for name, noise_transform in noise_transforms.items():
         test = CIFAR10Recall(root='./data', train=True, noise_transform=noise_transform,
                              transform=transform, transform_post=transform_post, download=False)
-        test = torch.utils.data.Subset(test, range(args.n_data))
-        test_loader = torch.utils.data.DataLoader(test, batch_size=batch_size, shuffle=False,
-                                                  drop_last=True, num_workers=4)
+        test = torch.utils.data.Subset(test, range(data_size))
         tests.append(test)
-        test_loaders[f"test_{name}"] = test_loader
-
+        learn_loaders[f"test_{name}"] = DataLoader(test, batch_size=learn_batch_size, shuffle=False)
+        score_loaders[f"test_{name}"] = DataLoader(test, batch_size=score_batch_size, shuffle=False)
     classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
     info = {'classes': classes, 'train': train, 'test': tests, 'x_dim': x_dim}
-    return train_loader, test_loaders, info
+    return learn_loaders, score_loaders, info
+
+
+def separate_train_test(loaders: Dict[str, DataLoader]) -> Tuple[DataLoader, Dict[str, DataLoader]]:
+    train_loader = loaders['train']
+    test_loaders = {name: loader for name, loader in loaders.items() if name != 'train'}
+    return train_loader, test_loaders
 
 
 def dataset_dispatcher(args):

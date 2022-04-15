@@ -2,6 +2,7 @@ import torch
 from typing import List, Tuple
 
 from bayes_pcn.const import *
+from .a_group import ActivationGroup
 from .layers import *
 from .util import *
 

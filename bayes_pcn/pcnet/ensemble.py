@@ -1,4 +1,3 @@
-import pyro
 import random
 import torch
 from typing import List
@@ -10,7 +9,6 @@ from .util import *
 
 
 class PCNetEnsemble:
-    # def __init__(self, args: Dict[str, Any]) -> None:
     def __init__(self, n_models: int, n_layers: int, x_dim: int, h_dim: int, act_fn: ActFn,
                  infer_T: int, infer_lr: float, sigma_prior: float, sigma_obs: float,
                  sigma_data: float, activation_optim: str, n_proposal_samples: int,
@@ -121,7 +119,7 @@ class PCNetEnsemble:
 
     def initialize_activation_group(self, X_obs: torch.Tensor) -> ActivationGroup:
         d_batch = X_obs.shape[0]
-        activations = [deepcopy(X_obs)]
+        activations = [X_obs]
         if self.activation_init_strat == ActInitStrat.FIXED:
             for _ in range(self._n_layers-1):
                 activations.append(torch.ones(d_batch, self._h_dim).to(self.device))

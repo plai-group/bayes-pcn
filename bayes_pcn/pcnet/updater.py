@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from copy import deepcopy
 import torch
-import torch.distributions as dists
 from typing import Callable, List, Tuple
 
 from bayes_pcn.const import EnsembleProposalStrat

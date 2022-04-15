@@ -7,7 +7,7 @@ import wandb
 
 from bayes_pcn.const import *
 
-from .dataset import dataset_dispatcher
+from .dataset import dataset_dispatcher, separate_train_test
 from .util import DotDict, save_config, load_config, save_result
 from .pcnet import PCNetEnsemble
 from .trainer import train_epoch, score_epoch
@@ -57,6 +57,7 @@ def get_parser() -> argparse.ArgumentParser:
                         help='Specifies test dataset configuration.')
     parser.add_argument('--n-data', type=int, default=4)
     parser.add_argument('--n-batch', type=int, default=4)
+    parser.add_argument('--n-batch-score', type=int, default=32)
 
     # training configs
     parser.add_argument('--n-epoch', type=int, default=1)
@@ -100,19 +101,23 @@ def model_dispatcher(args: Dict[str, Any], dataset_info: Dict[str, Any]) -> PCNe
                          weight_lr=args.weight_lr, sigma_forget=args.sigma_forget)
 
 
-def run(train_loader: DataLoader, test_loaders: Dict[str, DataLoader],
-        config: Tuple[PCNetEnsemble, Dict[str, Any]]):
+def run(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, DataLoader],
+        config: Tuple[PCNetEnsemble, Dict[str, Any]]) -> Dict[str, Any]:
     model, args = config
     results_dict = {'name': args.run_name, 'seed': args.seed, 'epoch': []}
     best_scores_dict = {}
     acc_thresh = args.recall_threshold
+    fast_mode = args.dataset_mode == 'fast'
+    learn_train_loader, learn_test_loaders = separate_train_test(loaders=learn_loaders)
+    score_train_loader, score_test_loaders = separate_train_test(loaders=score_loaders)
 
     for e in range(1, args.n_epoch+1):
-        train_epoch(train_loader=train_loader, test_loaders=test_loaders, model=model, epoch=e,
-                    n_repeat=args.n_repeat, log_every=args.log_every, plot_every=args.plot_every,
-                    acc_thresh=acc_thresh, fast_mode=args.dataset_mode == 'fast')
-        result_dict = score_epoch(train_loader=train_loader, test_loaders=test_loaders, epoch=e,
-                                  model=model, acc_thresh=acc_thresh, n_repeat=args.n_repeat)
+        train_epoch(train_loader=learn_train_loader, test_loaders=learn_test_loaders, model=model,
+                    epoch=e, n_repeat=args.n_repeat, log_every=args.log_every,
+                    plot_every=args.plot_every, acc_thresh=acc_thresh, fast_mode=fast_mode)
+        result_dict = score_epoch(train_loader=score_train_loader, test_loaders=score_test_loaders,
+                                  epoch=e, model=model, acc_thresh=acc_thresh,
+                                  n_repeat=args.n_repeat)
         save_config(config, f'{args.path}/latest.pt')
 
         results_dict['epoch'].append(e)
@@ -172,7 +177,7 @@ def main():
     if args.path is None:
         args.path = f'runs/{args.run_name}'
     setup(args)
-    train_loader, test_loaders, dataset_info = dataset_dispatcher(args=args)
+    learn_loaders, score_loaders, dataset_info = dataset_dispatcher(args=args)
     model = model_dispatcher(args=args, dataset_info=dataset_info)
 
     # If load_path is selected, use the current args but on a saved model
@@ -183,7 +188,7 @@ def main():
     if args.cuda and torch.cuda.device_count() > 0:
         model.device = torch.device('cuda')
 
-    result = run(train_loader=train_loader, test_loaders=test_loaders, config=config)
+    result = run(learn_loaders=learn_loaders, score_loaders=score_loaders, config=config)
     save_result(result=result, path=f"{args.path}/result.csv")
     wandb.finish()
 

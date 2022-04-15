@@ -1,7 +1,6 @@
 import math
 from matplotlib import pyplot as plt
 import pandas as pd
-import PIL
 import torch
 import torchvision
 from torch.utils.data import DataLoader
