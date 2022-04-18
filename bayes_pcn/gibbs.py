@@ -253,6 +253,8 @@ def main_gibbs():
     wandb.define_metric("epoch/*", step_metric="epoch/step")
     args = DotDict(wandb.config)
     args.run_name = wandb.run.name
+    if args.path is None:
+        args.path = f'runs/{args.run_name}'
 
     setup(args)
     learn_loaders, score_loaders, dataset_info = dataset_dispatcher(args)
