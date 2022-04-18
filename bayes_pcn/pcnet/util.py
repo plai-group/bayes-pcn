@@ -140,15 +140,16 @@ def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
     for _ in range(infer_T):
         log_joint = log_joint_fn(a_group)
         loss = -log_joint.sum(dim=0)
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
+        if loss.grad_fn is not None:
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
 
-        if has_fixed_indices:
-            orig_obs = a_group.original_obs
-            pred_obs = a_group.get_acts(layer_index=0, detach=True)
-            corrected_obs = orig_obs * fixed_indices + pred_obs * fixed_indices.logical_not()
-            a_group.set_acts(layer_index=0, value=corrected_obs)
+            if has_fixed_indices:
+                orig_obs = a_group.original_obs
+                pred_obs = a_group.get_acts(layer_index=0, detach=True)
+                corrected_obs = orig_obs * fixed_indices + pred_obs * fixed_indices.logical_not()
+                a_group.set_acts(layer_index=0, value=corrected_obs)
 
         mean_losses.append(loss.item() / a_group.d_batch)
         min_losses.append(-log_joint.min().item())
@@ -195,7 +196,8 @@ def ess_resample(objs: List[Any], log_weights: torch.Tensor, ess_thresh: float,
 
 
 def assert_positive_definite(matrix: torch.Tensor):
-    torch.linalg.cholesky(matrix)
+    if matrix.numel() > 0:
+        torch.linalg.cholesky(matrix)
 
 
 def fixed_indices_exists(fixed_indices: torch.Tensor) -> bool:

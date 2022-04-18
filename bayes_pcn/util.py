@@ -11,8 +11,6 @@ import wandb
 
 from copy import deepcopy
 
-from .dataset import dataset_dispatcher
-
 
 def save_config(config, path):
     config = (deepcopy(config[0]), dict(config[1]))

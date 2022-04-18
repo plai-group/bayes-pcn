@@ -6,8 +6,9 @@ from .trainer import get_next_data_batch, plot_data_batch, score_data_batch
 from .util import load_config
 
 
-def compare_cifar(path, index, n_repeat):
+def compare_cifar(path, index, n_repeat, dataset_mode):
     model, args = load_config(path)
+    args.dataset_mode = dataset_mode
     learn_loaders, _, _ = dataset_dispatcher(args)
     train_loader, test_loaders = separate_train_test(learn_loaders)
     train_loader, test_loaders = iter(train_loader), {k: iter(v) for k, v in test_loaders.items()}
@@ -27,5 +28,9 @@ if __name__ == "__main__":
     parser.add_argument('--path', type=str, default='runs/debug/latest.pt')
     parser.add_argument('--index', type=int, default=0, help='denotes which batch index to look.')
     parser.add_argument('--n-repeat', type=int, default=1)
+    parser.add_argument('--dataset-mode', type=str, default='fast',
+                        choices=['fast', 'mix', 'white', 'drop', 'mask'],
+                        help='Specifies test dataset configuration.')
     args = parser.parse_args()
-    compare_cifar(path=args.path, index=args.index, n_repeat=args.n_repeat)
+    compare_cifar(path=args.path, index=args.index, n_repeat=args.n_repeat,
+                  dataset_mode=args.dataset_mode)

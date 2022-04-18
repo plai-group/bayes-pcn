@@ -2,42 +2,46 @@ program: -mbayes_pcn
 method: grid
 parameters:
   seed:
-    value: 0
+    values: [0, 1, 2, 3]
   n-models:
     values: [1, 4]
   n-layers:
     values: [2, 4]
   h-dim:
-    value: 256
-  sigma-prior:
-    values: [1., 0.1]
-  sigma-obs:
-    value: 0.1
-  sigma-data:
-    values: [0.1, 0.01]
+    value: [64, 256, 1024, 2048]
   act-fn:
-    values: ["none", "relu", "gelu"]
+    values: ["none", "relu", "gelu", "selu"]
+  ensemble-log-joint-strat:
+    values: ["shared", "individual"]
+  sigma-prior:
+    value: 0.1
+  sigma-obs:
+    value: 0.05
+  sigma-data:
+    value: 0.01
   layer-log-prob-strat:
-    values: ["map", "p_pred"]
+    value: "p_pred"
   layer-sample-strat:
     value: "map"
   layer-update-strat:
     value: "bayes"
-  ensemble-log-joint-strat:
-    value: "shared"
   ensemble-proposal-strat:
-    values: ["mode", "full"]
+    value: "full"
   dataset:
     value: "cifar10"
   dataset-mode:
-    values: ["white", "mask"]
+    value: "fast"
   n-data:
-    values: [128]
+    value: 1024
   n-batch:
-    values: [1, 32]
+    value: 1
   n-epoch:
     value: 1
   activation-lr:
-    values: [0.01, 0.005]
+    value: 0.005
   T-infer:
     value: 1000
+  log-every:
+    value: 4
+  save-every:
+    value: 32

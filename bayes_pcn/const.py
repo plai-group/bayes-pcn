@@ -26,6 +26,7 @@ class LayerSampleStrat(ArgParseEnum):
 class LayerUpdateStrat(ArgParseEnum):
     ML = 'ml'        # Gradient descent update on weights given activations
     BAYES = 'bayes'  # Conjugate Bayesian update on weights given activations
+    MHN = 'mhn'      # Create a new PCNet model per observation
 
 
 class EnsembleLogJointStrat(ArgParseEnum):
@@ -48,6 +49,7 @@ class ActFn(ArgParseEnum):
     NONE = 'none'
     RELU = 'relu'
     GELU = 'gelu'
+    SELU = 'selu'
     SOFTMAX = 'softmax'
 
 

@@ -73,8 +73,7 @@ def get_parser() -> argparse.ArgumentParser:
     # eval configs
     parser.add_argument('--recall-threshold', type=float, default=0.005)
     parser.add_argument('--log-every', type=int, default=1, help="Log every this # of iterations")
-    parser.add_argument('--plot-every', type=int, default=1, help="Plot every this # of iterations")
-    parser.add_argument('--save-every', type=int, default=1, help="Save every this # of iterations")
+    parser.add_argument('--save-every', type=int, default=2, help="Save every this # of iterations")
     return parser
 
 
@@ -113,8 +112,8 @@ def run(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, DataLoade
 
     for e in range(1, args.n_epoch+1):
         train_epoch(train_loader=learn_train_loader, test_loaders=learn_test_loaders, model=model,
-                    epoch=e, n_repeat=args.n_repeat, log_every=args.log_every,
-                    plot_every=args.plot_every, acc_thresh=acc_thresh, fast_mode=fast_mode)
+                    epoch=e, n_repeat=args.n_repeat, log_every=args.log_every, fast_mode=fast_mode,
+                    save_every=args.save_every, acc_thresh=acc_thresh, args=args)
         result_dict = score_epoch(train_loader=score_train_loader, test_loaders=score_test_loaders,
                                   epoch=e, model=model, acc_thresh=acc_thresh,
                                   n_repeat=args.n_repeat)

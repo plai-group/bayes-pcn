@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 from typing import Dict, Any, List, Tuple
 import wandb
 from bayes_pcn.const import LayerLogProbStrat, LayerSampleStrat
-from bayes_pcn.dataset import separate_train_test
+from bayes_pcn.dataset import dataset_dispatcher, separate_train_test
 
 from bayes_pcn.pcnet.ensemble import PCNetPosterior, PCNetEnsemble
 from bayes_pcn.__main__ import get_parser, model_dispatcher, setup

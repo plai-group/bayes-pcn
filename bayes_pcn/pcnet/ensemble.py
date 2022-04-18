@@ -19,6 +19,8 @@ class PCNetEnsemble:
         self._n_layers: int = n_layers
         self._x_dim: int = x_dim
         self._h_dim: int = h_dim
+        self._infer_lr = infer_lr
+        self._infer_T = infer_T
         self._sigma_prior: float = sigma_prior
         self._sigma_obs: float = sigma_obs
         self._sigma_data: float = sigma_data
@@ -60,6 +62,8 @@ class PCNetEnsemble:
                 self._updater = VLBFullUpdater(**update_fn_args)
             else:
                 raise NotImplementedError()
+        elif self.layer_update_strat == LayerUpdateStrat.MHN:
+            self._updater = MHNUpdater(pcnet_template=deepcopy(self._pcnets[0]))
         else:
             raise NotImplementedError()
 
@@ -79,7 +83,7 @@ class PCNetEnsemble:
         # Update hidden layer while fixing obs layer
         a_group.clamp(obs=True, hidden=False)
         maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
-                           infer_lr=self._updater.infer_lr, infer_T=self._updater.infer_T,
+                           infer_lr=self._infer_lr, infer_T=self._infer_T,
                            fixed_indices=fixed_indices, activation_optim=self._activation_optim)
         for pcnet in self._pcnets:
             pcnet.delete_from_weights(a_group=a_group)
@@ -96,20 +100,21 @@ class PCNetEnsemble:
         for n in range(1, n_repeat+1):
             data_acts = a_group.get_acts(layer_index=0, detach=True)
             a_group = self.initialize_activation_group(X_obs=data_acts)
+            hidden_info, obs_info = None, None
             # Update hidden layer while fixing obs layer
-            a_group.clamp(obs=True, hidden=False)
-            hidden_info = maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
-                                             infer_lr=self._updater.infer_lr,
-                                             infer_T=self._updater.infer_T,
-                                             fixed_indices=fixed_indices,
-                                             activation_optim=self._activation_optim)
-            obs_info = None
-            if not fixed_indices_exists(fixed_indices=fixed_indices):
-                # Update obs layer while fixing hidden layers
+            if self._n_layers > 1:
+                a_group.clamp(obs=True, hidden=False)
+                hidden_info = maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
+                                                 infer_lr=self._infer_lr,
+                                                 infer_T=self._infer_T,
+                                                 fixed_indices=fixed_indices,
+                                                 activation_optim=self._activation_optim)
+            # Update obs layer while fixing hidden layers
+            if self._n_layers == 1 or not fixed_indices_exists(fixed_indices=fixed_indices):
                 a_group.clamp(obs=False, hidden=True)
                 obs_info = maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
-                                              infer_lr=self._updater.infer_lr,
-                                              infer_T=self._updater.infer_T,
+                                              infer_lr=self._infer_lr,
+                                              infer_T=self._infer_T,
                                               fixed_indices=fixed_indices,
                                               activation_optim=self._activation_optim)
             infer_info[f"repeat_{n}"] = {'hidden': hidden_info, 'obs': obs_info}
@@ -168,8 +173,8 @@ class PCNetEnsemble:
         for index, count in zip(indices.tolist(), counts.tolist()):
             if count > 0:
                 X_obs = None if a_group is None else a_group.get_acts(layer_index=0, detach=True)
-                sample, a_group = self._pcnets[index].sample(d_batch=count, X_obs=X_obs)
-                info.append((sample, a_group))
+                sample, sample_a_group = self._pcnets[index].sample(d_batch=count, X_obs=X_obs)
+                info.append((sample, sample_a_group))
 
         random.shuffle(info)
         data = torch.cat([sample_info[0] for sample_info in info], dim=0)

@@ -55,7 +55,8 @@ class MLUpdater(AbstractUpdater):
         """
         assert len(pcnets) == 1
         info = {}
-        for i, pcnet in enumerate(pcnets):
+        new_pcnets = deepcopy(pcnets)
+        for i, pcnet in enumerate(new_pcnets):
             a_group = self._activation_init_fn(X_obs=X_obs)
             # Update hidden layer while fixing obs layer
             a_group.clamp(obs=True, hidden=False)
@@ -64,20 +65,49 @@ class MLUpdater(AbstractUpdater):
                                           activation_optim=self._activation_optim)
             pcnet.update_weights(a_group=a_group, lr=kwargs.get('weight_lr', self._weight_lr))
             info[f"model_{i}"] = fit_info
-        return UpdateResult(pcnets=pcnets, log_weights=log_weights, info=info)
+        return UpdateResult(pcnets=new_pcnets, log_weights=log_weights, info=info)
 
 
-class LinearGaussianUpdater(AbstractUpdater):
-    """TODO: Implement this class which gives 'perfect update' to network weights when
-    there is no non-linearity. This could be done by only updating the top layer weights and
-    using MAP log joint evaluation for the bottom layer only.
+class MHNUpdater(AbstractUpdater):
+    def __init__(self, pcnet_template: PCNet, metric: str = 'euclidean'):
+        assert metric in ['dot', 'euclidean']
+        self._pcnet_template = pcnet_template
+        self._called = False
+        self._metric = metric
 
-    Args:
-        AbstractUpdater (_type_): _description_
-    """
     def __call__(self, X_obs: torch.Tensor, pcnets: List[PCNet], log_weights: torch.Tensor,
                  **kwargs) -> UpdateResult:
-        return super().__call__(X_obs, pcnets, log_weights, **kwargs)
+        """Perform a single gradient descent update on all PCNets parameters using the
+        recovered mode of the (joint) log joint closest to X_obs.
+        """
+        assert sum([len(pcnet.layers) for pcnet in pcnets]) == len(pcnets)
+        info = dict(model_0=dict(mean_losses=[], min_losses=[], max_losses=[]))
+
+        # Do not make use of the default PCNet that is instantiated when PCNetEnsemble is created
+        if not self._called:
+            self._called = True
+            new_pcnets = []
+        else:
+            new_pcnets = deepcopy(pcnets)
+
+        # Add a new PCNet per fresh observation
+        for datapoint in X_obs:
+            new_pcnet = deepcopy(self._pcnet_template)
+            new_pcnet.device = X_obs.device
+            new_pcnet.layers[0].fix_weights(weights=deepcopy(datapoint))
+            new_pcnets.append(new_pcnet)
+
+        # Set component importance appropriately
+        if self._metric == 'euclidean':
+            log_weights = (torch.ones(len(new_pcnets)) / len(new_pcnets)).log()
+        elif self._metric == 'dot':
+            key_sq_norms = [(pcnet.layers[0]._R.norm(p=2) ** 2).item() for pcnet in new_pcnets]
+            log_weights = torch.tensor(key_sq_norms).log()
+            log_weights = log_weights - log_weights.logsumexp(dim=0)
+        else:
+            raise NotImplementedError()
+        log_weights = log_weights.to(X_obs.device)
+        return UpdateResult(pcnets=new_pcnets, log_weights=log_weights, info=info)
 
 
 class AbstractVLBUpdater(AbstractUpdater):
@@ -99,7 +129,10 @@ class AbstractVLBUpdater(AbstractUpdater):
         """
         # Fit and sample proposal distribution(s).
         n_samples = self._n_proposal_samples
-        fit_sample_args = dict(X_obs=X_obs, n_samples=n_samples)
+        n_layers = len(pcnets[0].layers)
+        n_models = len(pcnets)
+        fit_sample_args = dict(X_obs=X_obs, n_samples=n_samples,
+                               n_layers=n_layers, n_models=n_models)
         if self._shared_log_joint:
             fit_sample_args['log_joint_fn'] = self._ensemble_log_joint
             fit_sample_args['sample_weight_log_joint_fns'] = [pcnet.log_joint for pcnet in pcnets]
@@ -151,14 +184,19 @@ class AbstractVLBUpdater(AbstractUpdater):
                         a_group: ActivationGroup) -> BaseDistribution:
         raise NotImplementedError()
 
-    def _fit_sample_proposal(self, X_obs: torch.Tensor, n_samples: int,
-                             log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
+    def _fit_sample_proposal(self, X_obs: torch.Tensor, n_samples: int, n_layers: int,
+                             n_models: int, log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
                              **kwargs) -> Tuple[List[ActivationGroup], torch.Tensor, List[Any]]:
-        proposal, fit_info = self._fit_proposal(log_joint_fn=log_joint_fn, X_obs=X_obs)
-        samples = [proposal.sample() for _ in range(n_samples)]
-        log_sample_weight = self._log_sample_weight_unnorm(a_groups=samples,
-                                                           log_joint_fn=log_joint_fn,
-                                                           proposal_fn=proposal.log_prob, **kwargs)
+        if n_layers == 1:
+            samples = [self._activation_init_fn(X_obs=X_obs) for _ in range(n_samples)]
+            log_sample_weight = torch.zeros(n_models * n_samples, X_obs.shape[0])
+            fit_info = dict()
+        else:
+            proposal, fit_info = self._fit_proposal(log_joint_fn=log_joint_fn, X_obs=X_obs)
+            samples = [proposal.sample() for _ in range(n_samples)]
+            log_sample_weight = self._log_sample_weight_unnorm(log_joint_fn=log_joint_fn,
+                                                               proposal_fn=proposal.log_prob,
+                                                               a_groups=samples, **kwargs)
         return samples, log_sample_weight, fit_info
 
     def _fit_proposal(self, log_joint_fn: Callable[[ActivationGroup], torch.Tensor],

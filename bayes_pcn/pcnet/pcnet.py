@@ -83,6 +83,10 @@ class PCNet:
                      sigma_obs: float, sigma_data: float, act_fn: ActFn, scale_layer: bool,
                      **kwargs) -> List[AbstractPCLayer]:
         sigma_obs_l0 = sigma_obs if sigma_data is None else sigma_data
+        if n_layers == 1:
+            return [PCTopLayer(d_out=x_dim, sigma_prior=sigma_prior,
+                               sigma_obs=sigma_obs_l0, layer_index=0, **kwargs)]
+
         layers = [PCLayer(d_in=d_h, d_out=x_dim, act_fn=act_fn, sigma_prior=sigma_prior,
                           sigma_obs=sigma_obs_l0, scale_layer=scale_layer, layer_index=0, **kwargs)]
         for i in range(1, n_layers-1):

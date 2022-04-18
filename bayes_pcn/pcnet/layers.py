@@ -121,7 +121,7 @@ class PCLayer(AbstractPCLayer):
 
         # MatrixNormal prior mean matrix
         self._R = torch.empty(d_in, d_out)
-        torch.nn.init.kaiming_uniform_(self._R, a=5**0.5)  # default torch initialization
+        torch.nn.init.kaiming_normal_(self._R, a=5**0.5)
         # MatrixNormal prior row-wise covariance matrix (initially isotropic)
         self._U = torch.eye(d_in) * sigma_prior ** 2
         # Isotropic observation variance
@@ -185,6 +185,8 @@ class PCLayer(AbstractPCLayer):
             result = F.relu(X_in)
         elif self._act_fn == ActFn.GELU:
             result = F.gelu(X_in)
+        elif self._act_fn == ActFn.SELU:
+            result = F.selu(X_in)
         elif self._act_fn == ActFn.SOFTMAX:
             result = F.softmax(X_in, dim=-1)
         else:
@@ -266,7 +268,7 @@ class PCTopLayer(AbstractPCLayer):
 
         # Normal prior mean vector
         self._R = torch.empty(d_out)
-        torch.nn.init.uniform_(self._R, -d_out**-0.5, d_out**-0.5)
+        torch.nn.init.normal_(self._R, 0, d_out**-0.5)
         # Normal prior covariance matrix
         self._U = torch.eye(d_out) * sigma_prior ** 2
         # Isotropic observation variance
@@ -293,7 +295,7 @@ class PCTopLayer(AbstractPCLayer):
         dist = dists.Normal(marginal_mean, marginal_Sigma ** 0.5)
         return dist.log_prob(X_obs).sum(dim=-1)
 
-    def predict(self, X_in: torch.Tensor = None, d_batch: int = None) -> torch.Tensor:
+    def predict(self, X_in: torch.Tensor = None, d_batch: int = None, **kwargs) -> torch.Tensor:
         if d_batch is None:
             d_batch = 1 if X_in is None else X_in.shape[0]
         return self._R.repeat(d_batch, 1)

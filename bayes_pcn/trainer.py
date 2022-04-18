@@ -10,7 +10,7 @@ import wandb
 from bayes_pcn.pcnet.util import fixed_indices_exists
 
 from .pcnet import PCNetEnsemble, DataBatch, UpdateResult
-from .util import fig2img, unnormalize
+from .util import DotDict, fig2img, save_config, unnormalize
 
 
 def get_next_data_batch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader]) -> DataBatch:
@@ -116,9 +116,9 @@ def plot_update_energy(update_result: UpdateResult, caption: str = None) -> wand
     all_max_losses = []
     for model_name, model_fit_info in update_info.items():
         model_names.append(model_name)
-        all_mean_losses.append(model_fit_info['mean_losses'])
-        all_min_losses.append(model_fit_info['min_losses'])
-        all_max_losses.append(model_fit_info['max_losses'])
+        all_mean_losses.append(model_fit_info.get('mean_losses', []))
+        all_min_losses.append(model_fit_info.get('min_losses', []))
+        all_max_losses.append(model_fit_info.get('max_losses', []))
     ncols = min(4, len(update_info))
     nrows = math.ceil(len(update_info)/ncols)
     fig, ax = plt.subplots(ncols=ncols, nrows=nrows, squeeze=False, sharex=True, sharey=True)
@@ -172,22 +172,26 @@ def score(X_pred: torch.Tensor, X_truth: torch.Tensor, acc_thresh: float,
 
 
 def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], model: PCNetEnsemble,
-                epoch: int, n_repeat: int, log_every: int = 1, plot_every: int = 1,
-                acc_thresh: float = 0.005, fast_mode: bool = False) -> PCNetEnsemble:
+                epoch: int, n_repeat: int, log_every: int = 1, save_every: int = None,
+                acc_thresh: float = 0.005, fast_mode: bool = False, args: DotDict = None
+                ) -> PCNetEnsemble:
     """Update model on all datapoint once. Assess model performance on unnoised and noised data.
 
     Args:
         train_loader (DataLoader): _description_
         test_loaders (Dict[str, DataLoader]): _description_
-        model (PCNet): _description_
+        model (PCNetEnsemble): _description_
+        epoch (int): _description_
+        n_repeat (int): _description_
         log_every (int, optional): _description_. Defaults to 1.
-        plot_every (int, optional): _description_. Defaults to 1.
+        save_every (int, optional): _description_. Defaults to None.
         acc_thresh (float, optional): _description_. Defaults to 0.005.
+        fast_mode (bool, optional): _description_. Defaults to False.
+        args (DotDict, optional): _description_. Defaults to None.
 
     Returns:
-        PCNet: _description_
+        PCNetEnsemble: _description_
     """
-    assert (log_every % plot_every) == 0
     train_loader = iter(train_loader)
     test_loaders = {name: iter(test_loader) for name, test_loader in test_loaders.items()}
 
@@ -206,8 +210,7 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
                                                   acc_thresh=acc_thresh, n_repeat=n_repeat,
                                                   prefix='unseen')
             wandb_dict.update(result)
-            if (i % plot_every) == 0:
-                unseen_img = plot_data_batch(data_batch=pred_batch)
+            unseen_img = plot_data_batch(data_batch=pred_batch)
 
         # Update model
         X_train = curr_batch.train[0]
@@ -219,8 +222,7 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
                                                   acc_thresh=acc_thresh, n_repeat=n_repeat,
                                                   prefix='initial')
             wandb_dict.update(result)
-            if (i % plot_every) == 0:
-                init_img = plot_data_batch(data_batch=pred_batch)
+            init_img = plot_data_batch(data_batch=pred_batch)
 
         # Evaluate model performance on the current data batches after update
         if (i % log_every) == 0:
@@ -228,8 +230,7 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
                                                   acc_thresh=acc_thresh, n_repeat=n_repeat,
                                                   prefix='current')
             wandb_dict.update(result)
-            if (i % plot_every) == 0:
-                curr_img = plot_data_batch(data_batch=pred_batch)
+            curr_img = plot_data_batch(data_batch=pred_batch)
 
         # # TMP!!!
         # res = model.delete(X_obs=X_train)
@@ -247,7 +248,7 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         # # TMP!!!
 
         # Generate data samples and plot log loss trajectory
-        if (i % plot_every) == 0:
+        if (i % log_every) == 0:
             gen_img = generate_samples(model=model, X_shape=X_shape, d_batch=8,
                                        caption="Model samples via ancestral sampling.")
             update_img = plot_update_energy(update_result=update_result,
@@ -264,6 +265,9 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
             # wandb_dict["Deleted Image"] = del_img
             # wandb_dict["Restored Image"] = ret_img
             wandb.log(wandb_dict)
+
+        if save_every is not None and (i % save_every) == 0:
+            save_config((model, args), f"{args.path}/model_{epoch}_{i}.pt")
     return model
 
 
