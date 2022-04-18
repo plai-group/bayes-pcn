@@ -8,7 +8,7 @@ parameters:
   n-layers:
     values: [2, 4]
   h-dim:
-    value: [64, 256, 1024, 2048]
+    values: [64, 256, 1024, 2048]
   act-fn:
     values: ["none", "relu", "gelu", "selu"]
   ensemble-log-joint-strat:
