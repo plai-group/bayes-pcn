@@ -8,7 +8,7 @@ import wandb
 from bayes_pcn.const import *
 
 from .dataset import dataset_dispatcher, separate_train_test
-from .util import DotDict, save_config, load_config, save_result
+from .util import DotDict, save_config, load_config, save_result, setup
 from .pcnet import PCNetEnsemble
 from .trainer import train_epoch, score_epoch
 
@@ -16,47 +16,49 @@ from .trainer import train_epoch, score_epoch
 def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     # general configs
-    parser.add_argument('--path', type=str, default=None)
+    parser.add_argument('--run-name', type=str, default=None,
+                        help='Name of this run. If not specified set to wandb ID.')
+    parser.add_argument('--run-group', type=str, default='default', help='Group this run is in.')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--load-path', type=str, default=None)
-    parser.add_argument('--wandb-mode', type=str, choices=['online', 'offline'], default='online')
+    parser.add_argument('--wandb-mode', type=str, choices=['online', 'offline'], default='offline')
     parser.add_argument('--dtype', type=str, choices=['float32', 'float64'], default='float32',
                         help='Use float64 if deletion is needed for numerical stability.')
     parser.add_argument('--cuda', action='store_true', help='Use GPU if available.')
 
     # model configs
-    parser.add_argument('--n-models', type=int, default=2)
+    parser.add_argument('--n-models', type=int, default=1)
     parser.add_argument('--n-layers', type=int, default=2)
     parser.add_argument('--h-dim', type=int, default=256)
     parser.add_argument('--sigma-prior', type=float, default=1.)
     parser.add_argument('--sigma-obs', type=float, default=0.1)
     parser.add_argument('--sigma-data', type=float, default=0.01)
-    parser.add_argument('--sigma-forget', type=float, default=0.)
+    parser.add_argument('--beta-forget', type=float, default=0., help='between 0-1. 0 = no forget.')
     parser.add_argument('--scale-layer', action='store_true', help='normalize layer activations.')
     parser.add_argument('--act-fn', type=ActFn,
                         default=ActFn.RELU, choices=list(ActFn))
     parser.add_argument('--activation-init-strat', type=ActInitStrat,
-                        default=ActInitStrat.FIXED, choices=list(ActInitStrat))
+                        default=ActInitStrat.RANDN, choices=list(ActInitStrat))
     parser.add_argument('--layer-log-prob-strat', type=LayerLogProbStrat,
                         default=LayerLogProbStrat.P_PRED, choices=list(LayerLogProbStrat))
     parser.add_argument('--layer-sample-strat', type=LayerSampleStrat,
-                        default=LayerSampleStrat.P_PRED, choices=list(LayerSampleStrat))
+                        default=LayerSampleStrat.MAP, choices=list(LayerSampleStrat))
     parser.add_argument('--layer-update-strat', type=LayerUpdateStrat,
                         default=LayerUpdateStrat.BAYES, choices=list(LayerUpdateStrat))
     parser.add_argument('--ensemble-log-joint-strat', type=EnsembleLogJointStrat,
                         default=EnsembleLogJointStrat.SHARED,
                         choices=list(EnsembleLogJointStrat))
     parser.add_argument('--ensemble-proposal-strat', type=EnsembleProposalStrat,
-                        default=EnsembleProposalStrat.MODE,
+                        default=EnsembleProposalStrat.FULL,
                         choices=list(EnsembleProposalStrat))
 
     # data configs
     parser.add_argument('--dataset', type=str, choices=['cifar10'], default='cifar10')
     parser.add_argument('--dataset-mode', type=str, default='fast',
-                        choices=['fast', 'mix', 'white', 'drop', 'mask'],
+                        choices=['fast', 'mix', 'white', 'drop', 'mask', 'all'],
                         help='Specifies test dataset configuration.')
     parser.add_argument('--n-data', type=int, default=4)
-    parser.add_argument('--n-batch', type=int, default=4)
+    parser.add_argument('--n-batch', type=int, default=1)
     parser.add_argument('--n-batch-score', type=int, default=32)
 
     # training configs
@@ -77,12 +79,6 @@ def get_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def setup(args):
-    os.makedirs(args.path, exist_ok=True)
-    torch.manual_seed(args.seed)
-    torch.set_default_dtype(torch.float32 if args.dtype == 'float32' else torch.float64)
-
-
 def model_dispatcher(args: Dict[str, Any], dataset_info: Dict[str, Any]) -> PCNetEnsemble:
     return PCNetEnsemble(n_models=args.n_models, n_layers=args.n_layers, h_dim=args.h_dim,
                          x_dim=dataset_info.get('x_dim'), act_fn=args.act_fn, infer_T=args.T_infer,
@@ -97,7 +93,7 @@ def model_dispatcher(args: Dict[str, Any], dataset_info: Dict[str, Any]) -> PCNe
                          ensemble_log_joint_strat=args.ensemble_log_joint_strat,
                          ensemble_proposal_strat=args.ensemble_proposal_strat,
                          scale_layer=args.scale_layer, resample=args.resample,
-                         weight_lr=args.weight_lr, sigma_forget=args.sigma_forget)
+                         weight_lr=args.weight_lr, beta_forget=args.beta_forget)
 
 
 def run(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, DataLoader],
@@ -171,10 +167,10 @@ def main():
     wandb.define_metric("epoch/step")
     wandb.define_metric("epoch/*", step_metric="epoch/step")
     args = DotDict(wandb.config)
-    args.run_name = wandb.run.name
+    args.run_name = wandb.run.id if args.run_name is None else args.run_name
+    args.path = f'runs/{args.run_group}/{args.run_name}'
+    print(f"Saving models to directory: {args.path}")
 
-    if args.path is None:
-        args.path = f'runs/{args.run_name}'
     setup(args)
     learn_loaders, score_loaders, dataset_info = dataset_dispatcher(args=args)
     model = model_dispatcher(args=args, dataset_info=dataset_info)
@@ -188,7 +184,7 @@ def main():
         model.device = torch.device('cuda')
 
     result = run(learn_loaders=learn_loaders, score_loaders=score_loaders, config=config)
-    save_result(result=result, path=f"{args.path}/result.csv")
+    save_result(result=result, path=f"{args.path}/train.csv")
     wandb.finish()
 
 

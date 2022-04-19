@@ -201,7 +201,7 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         X_shape = curr_batch.original_shape
         if i == 1:
             first_batch = curr_batch
-        wandb_dict = {"step": (epoch - 1) * len(train_loader) + i}
+        wandb_dict = {"step": (epoch - 1) * len(train_loader) + i - (1 if epoch > 1 else 0)}
         init_img, unseen_img, curr_img, gen_img, update_img = None, None, None, None, None
 
         # Evaluate model performance on the current data batch before update
@@ -257,11 +257,12 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         # Log to wandb
         if (i % log_every) == 0:
             wandb_dict = {f"iteration/{k}": v for k, v in wandb_dict.items()}
-            wandb_dict["Initial Image"] = init_img
-            wandb_dict["Unseen Image"] = unseen_img
             wandb_dict["Current Image"] = curr_img
             wandb_dict["Generated Image"] = gen_img
             wandb_dict["Update Energy Plot"] = update_img
+            if not fast_mode:
+                wandb_dict["Initial Image"] = init_img
+                wandb_dict["Unseen Image"] = unseen_img
             # wandb_dict["Deleted Image"] = del_img
             # wandb_dict["Restored Image"] = ret_img
             wandb.log(wandb_dict)

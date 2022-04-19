@@ -3,6 +3,7 @@ from pyro.infer.mcmc.util import initialize_model, summary
 from statistics import mean
 import torch
 from torch.utils.data import DataLoader
+import torchvision
 from typing import Dict, Any, List, Tuple
 import wandb
 from bayes_pcn.const import LayerLogProbStrat, LayerSampleStrat
@@ -231,7 +232,7 @@ def run_gibbs(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, Dat
     result_dict = score_gibbs(train_loader=score_train_loader, test_loaders=score_test_loaders,
                               model=ensemble, acc_thresh=acc_thresh, epoch=1, n_repeat=1)
     results_dict.update(result_dict)
-    save_config(config, f'{args.path}/latest.pt')
+    save_config(config, f'{args.path}/{args.run_name}/latest.pt')
     return results_dict
 
 

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from copy import deepcopy
 import torch
 import torch.nn.functional as F
 import torch.distributions as dists
@@ -31,9 +32,9 @@ class AbstractPCLayer(ABC):
         if self._update_strat == LayerUpdateStrat.ML:
             self._ml_update(X_obs=X_obs, **kwargs)
         elif self._update_strat == LayerUpdateStrat.BAYES:
-            sigma_forget = kwargs.pop('sigma_forget', 0.)
-            if sigma_forget > 0.:
-                self._bayes_forget(sigma_forget=sigma_forget)
+            beta_forget = kwargs.pop('beta_forget', 0.)
+            if beta_forget > 0.:
+                self._bayes_forget(beta_forget=beta_forget)
             self._bayes_update(X_obs=X_obs, **kwargs)
         else:
             raise NotImplementedError()
@@ -54,7 +55,7 @@ class AbstractPCLayer(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def _bayes_forget(self, sigma_forget: float) -> None:
+    def _bayes_forget(self, beta_forget: float) -> None:
         raise NotImplementedError()
 
     @property
@@ -122,8 +123,10 @@ class PCLayer(AbstractPCLayer):
         # MatrixNormal prior mean matrix
         self._R = torch.empty(d_in, d_out)
         torch.nn.init.kaiming_normal_(self._R, a=5**0.5)
+        self._R_original = deepcopy(self._R)
         # MatrixNormal prior row-wise covariance matrix (initially isotropic)
         self._U = torch.eye(d_in) * sigma_prior ** 2
+        self._U_original = deepcopy(self._U)
         # Isotropic observation variance
         self._Sigma = sigma_obs ** 2
 
@@ -244,8 +247,10 @@ class PCLayer(AbstractPCLayer):
         R_term_2 = self._R - Sigma_c.T.matmul(inv_term_R.inverse()).matmul(X_obs)
         self._R = R_term_1.matmul(R_term_2)
 
-    def _bayes_forget(self, sigma_forget: float) -> None:
-        self._U = self._U + (sigma_forget ** 2) * torch.eye(self._U.shape[0]).to(self.device)
+    def _bayes_forget(self, beta_forget: float) -> None:
+        self._R = (1-beta_forget)**0.5*self._R + (1-(1-beta_forget)**0.5)*self._R_original
+        self._U = (1-beta_forget)*self._U + beta_forget*self._U_original
+        # self._U = self._U + (beta_forget ** 2) * torch.eye(self._U.shape[0]).to(self.device)
 
     def sample_weights(self) -> torch.Tensor:
         L = torch.linalg.cholesky(self._U)
@@ -269,8 +274,10 @@ class PCTopLayer(AbstractPCLayer):
         # Normal prior mean vector
         self._R = torch.empty(d_out)
         torch.nn.init.normal_(self._R, 0, d_out**-0.5)
+        self._R_original = deepcopy(self._R)
         # Normal prior covariance matrix
         self._U = torch.eye(d_out) * sigma_prior ** 2
+        self._U_original = deepcopy(self._U)
         # Isotropic observation variance
         self._Sigma = sigma_obs ** 2
 
@@ -358,8 +365,10 @@ class PCTopLayer(AbstractPCLayer):
         self._R = self._U[0, 0]/Sigma_posterior[0, 0] * self._R\
             - self._U[0, 0]/self._Sigma * X_obs.mean(dim=0)
 
-    def _bayes_forget(self, sigma_forget: float) -> None:
-        self._U = self._U + (sigma_forget ** 2) * torch.eye(self._U.shape[0]).to(self.device)
+    def _bayes_forget(self, beta_forget: float) -> None:
+        self._R = (1-beta_forget)**0.5*self._R + (1-(1-beta_forget)**0.5)*self._R_original
+        self._U = (1-beta_forget)*self._U + beta_forget*self._U_original
+        # self._U = self._U + (beta_forget ** 2) * torch.eye(self._U.shape[0]).to(self.device)
 
     def sample_weights(self) -> torch.Tensor:
         L = torch.linalg.cholesky(self._U)

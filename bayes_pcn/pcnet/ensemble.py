@@ -46,10 +46,11 @@ class PCNetEnsemble:
                               n_proposal_samples=n_proposal_samples,
                               activation_optim=activation_optim)
         if self.layer_update_strat == LayerUpdateStrat.ML:
+            assert self.layer_log_prob_strat == LayerLogProbStrat.MAP
             update_fn_args['weight_lr'] = kwargs.get('weight_lr', None)
         if self.layer_update_strat == LayerUpdateStrat.BAYES:
             update_fn_args['resample'] = kwargs.get('resample', False)
-            update_fn_args['sigma_forget'] = kwargs.get('sigma_forget', 0.)
+            update_fn_args['beta_forget'] = kwargs.get('beta_forget', 0.)
         if self.ensemble_log_joint_strat == EnsembleLogJointStrat.SHARED:
             update_fn_args['ensemble_log_joint'] = self.log_joint
 
@@ -127,10 +128,12 @@ class PCNetEnsemble:
         activations = [X_obs]
         if self.activation_init_strat == ActInitStrat.FIXED:
             for _ in range(self._n_layers-1):
-                activations.append(torch.ones(d_batch, self._h_dim).to(self.device))
+                activation = self._h_dim**-0.5 * torch.ones(d_batch, self._h_dim).to(self.device)
+                activations.append(activation)
         elif self.activation_init_strat == ActInitStrat.RANDN:
             for _ in range(self._n_layers-1):
-                activations.append(torch.randn(d_batch, self._h_dim).to(self.device))
+                activation = self._h_dim**-0.5 * torch.randn(d_batch, self._h_dim).to(self.device)
+                activations.append(activation)
         elif self.activation_init_strat == ActInitStrat.SAMPLE:
             raise NotImplementedError()
         else:

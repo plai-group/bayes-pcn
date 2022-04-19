@@ -40,8 +40,8 @@ class EnsembleProposalStrat(ArgParseEnum):
 
 
 class ActInitStrat(ArgParseEnum):
-    FIXED = 'fixed'    # Initialize hidden activation values to 1 (0 doesn't work cuz gradient)
-    RANDN = 'randn'    # Initialize hidden activation values to normal samples
+    FIXED = 'fixed'    # Initialize hidden activation values to self._h_dim ** -0.5
+    RANDN = 'randn'    # Initialize hidden activation values to kaiming normal samples
     SAMPLE = 'sample'  # Initialize hidden activation values to model samples
 
 
@@ -63,6 +63,7 @@ class DatasetMode(ArgParseEnum):
     WHITE = 'white'
     DROP = 'drop'
     MASK = 'mask'
+    ALL = 'all'
 
 
 class Optimizer(ArgParseEnum):

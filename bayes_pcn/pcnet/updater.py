@@ -119,7 +119,7 @@ class AbstractVLBUpdater(AbstractUpdater):
         super().__init__(activation_init_fn, infer_lr, infer_T, proposal_strat, n_proposal_samples,
                          activation_optim, ensemble_log_joint, **kwargs)
         self._resample = kwargs.get('resample', False)
-        self._sigma_forget = kwargs.get('sigma_forget', 0.)
+        self._beta_forget = kwargs.get('beta_forget', 0.)
 
     def __call__(self, X_obs: torch.Tensor, pcnets: List[PCNet], log_weights: torch.Tensor,
                  **kwargs) -> UpdateResult:
@@ -162,7 +162,7 @@ class AbstractVLBUpdater(AbstractUpdater):
             j = i * n_samples
             for a_group, log_sample_weight in zip(a_groups_model, log_sample_weights_model):
                 new_pcnet = deepcopy(pcnet)
-                new_pcnet.update_weights(a_group=a_group, sigma_forget=self._sigma_forget)
+                new_pcnet.update_weights(a_group=a_group, beta_forget=self._beta_forget)
                 new_pcnets.append(new_pcnet)
                 new_log_weight = log_weight_model + log_sample_weight.sum()
                 new_log_weights.append(new_log_weight)

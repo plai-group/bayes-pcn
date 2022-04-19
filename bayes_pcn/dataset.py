@@ -90,15 +90,13 @@ class CIFAR10Recall(datasets.CIFAR10):
         return img, fixed_indices
 
 
-def cifar10(args) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader], Dict[str, Any]]:
-    data_size = args.n_data
-    learn_batch_size = min(args.n_batch, data_size)
-    score_batch_size = min(args.n_batch_score, data_size)
-    assert (data_size % learn_batch_size) == 0 and (data_size % score_batch_size) == 0
-    x_dim = 3 * 32 * 32
+def separate_train_test(loaders: Dict[str, DataLoader]) -> Tuple[DataLoader, Dict[str, DataLoader]]:
+    train_loader = loaders['train']
+    test_loaders = {name: loader for name, loader in loaders.items() if name != 'train'}
+    return train_loader, test_loaders
 
-    config = args.dataset_mode
 
+def get_transforms(config: str):
     # Image preprocessing logic
     transform = transforms.Compose([transforms.ToTensor()])
     transform_post = transforms.Compose([transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
@@ -120,38 +118,64 @@ def cifar10(args) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader], Dict[st
         noise_transforms = {'mask0.25': MaskingNoise(p=0.25),
                             'mask0.50': MaskingNoise(p=0.50),
                             'mask0.75': MaskingNoise(p=0.75)}
+    elif config == 'all':
+        noise_transforms = {'white0.2': WhiteNoise(var=0.2**2),
+                            'white0.4': WhiteNoise(var=0.4**2),
+                            'white0.8': WhiteNoise(var=0.8**2),
+                            'drop0.25': DropoutNoise(p=0.25),
+                            'drop0.50': DropoutNoise(p=0.50),
+                            'drop0.75': DropoutNoise(p=0.75),
+                            'mask0.25': MaskingNoise(p=0.25),
+                            'mask0.50': MaskingNoise(p=0.50),
+                            'mask0.75': MaskingNoise(p=0.75)}
     else:
         raise Exception(f"dataset-mode '{config}' is not supported.")
     # if not config == 'fast':
     #     noise_transforms['pure'] = PureNoise()
+    return transform, transform_post, noise_transforms
 
+
+def get_dataset(dataset_cls, transform, transform_post, noise_transforms,
+                data_size, learn_batch_size, score_batch_size):
     # Initialize train and test dataloaders
-    train = CIFAR10Recall(root='./data', train=True, download=True,
-                          transform=transform, transform_post=transform_post)
+    train = dataset_cls(root='./data', train=True, download=True,
+                        transform=transform, transform_post=transform_post)
     train = torch.utils.data.Subset(train, range(data_size))
     tests = []
     learn_loaders = dict(train=DataLoader(train, batch_size=learn_batch_size, shuffle=False))
     score_loaders = dict(train=DataLoader(train, batch_size=score_batch_size, shuffle=False))
     for name, noise_transform in noise_transforms.items():
-        test = CIFAR10Recall(root='./data', train=True, noise_transform=noise_transform,
-                             transform=transform, transform_post=transform_post, download=False)
+        test = dataset_cls(root='./data', train=True, noise_transform=noise_transform,
+                           transform=transform, transform_post=transform_post, download=False)
         test = torch.utils.data.Subset(test, range(data_size))
         tests.append(test)
         learn_loaders[f"test_{name}"] = DataLoader(test, batch_size=learn_batch_size, shuffle=False)
         score_loaders[f"test_{name}"] = DataLoader(test, batch_size=score_batch_size, shuffle=False)
+    return learn_loaders, score_loaders, train, tests
+
+
+def cifar10(**kwargs) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader], Dict[str, Any]]:
+    x_dim = 3 * 32 * 32
+    learn_loaders, score_loaders, train, tests = get_dataset(dataset_cls=CIFAR10Recall, **kwargs)
     classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
     info = {'classes': classes, 'train': train, 'test': tests, 'x_dim': x_dim}
     return learn_loaders, score_loaders, info
 
 
-def separate_train_test(loaders: Dict[str, DataLoader]) -> Tuple[DataLoader, Dict[str, DataLoader]]:
-    train_loader = loaders['train']
-    test_loaders = {name: loader for name, loader in loaders.items() if name != 'train'}
-    return train_loader, test_loaders
-
-
 def dataset_dispatcher(args):
+    data_size = args.n_data
+    learn_batch_size = min(args.n_batch, data_size)
+    score_batch_size = min(args.n_batch_score, data_size)
+    assert (data_size % learn_batch_size) == 0 and (data_size % score_batch_size) == 0
+
+    # Image preprocessing logic
+    dataset_mode = args.dataset_mode
+    transform, transform_post, noise_transforms = get_transforms(config=dataset_mode)
+
+    dataset_args = dict(transform=transform, transform_post=transform_post,
+                        noise_transforms=noise_transforms, data_size=data_size,
+                        learn_batch_size=learn_batch_size, score_batch_size=score_batch_size)
     if args.dataset == 'cifar10':
-        return cifar10(args)
+        return cifar10(**dataset_args)
     else:
         raise NotImplementedError()
