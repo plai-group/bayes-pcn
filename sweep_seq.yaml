@@ -13,6 +13,10 @@ parameters:
     values: [2, 4]
   ensemble-log-joint-strat:
     values: ["shared", "individual"]
+  run-group:
+    value: "sweep-seq"
+  wandb-mode:
+    value: "online"
   sigma-prior:
     value: 1.
   sigma-obs:

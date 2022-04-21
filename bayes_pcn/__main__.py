@@ -49,7 +49,7 @@ def get_parser() -> argparse.ArgumentParser:
                         default=EnsembleLogJointStrat.SHARED,
                         choices=list(EnsembleLogJointStrat))
     parser.add_argument('--ensemble-proposal-strat', type=EnsembleProposalStrat,
-                        default=EnsembleProposalStrat.FULL,
+                        default=EnsembleProposalStrat.MODE,
                         choices=list(EnsembleProposalStrat))
 
     # data configs

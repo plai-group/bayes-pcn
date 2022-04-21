@@ -50,11 +50,15 @@ def sample_activations_posterior(model: PCNetEnsemble, data_batch: DataBatch,
     a_group.device = model.device
 
     # Run NUTS and take a single sample from the chain
-    nuts_kernel = NUTS(model=model.sample, step_size=mh_step_size, adapt_step_size=False)
+    # step_size=mh_step_size, adapt_step_size=False
+    nuts_kernel = NUTS(model=model.sample, step_size=mh_step_size, full_mass=True,
+                       adapt_step_size=False, adapt_mass_matrix=True, max_tree_depth=5)
     mcmc = MCMC(
         nuts_kernel,
-        num_samples=T_mh + 1,
-        warmup_steps=0,
+        # num_samples=T_mh + 1,
+        # warmup_steps=0,
+        num_samples=9 * (T_mh//10) + 1,
+        warmup_steps=T_mh // 10,
     )
     mcmc.run(a_group.d_batch, a_group)
     samples = mcmc.get_samples()
@@ -72,13 +76,13 @@ def sample_activations_posterior(model: PCNetEnsemble, data_batch: DataBatch,
         a_group.clamp(obs=True, hidden=True)
         a_group.device = model.device
     posterior_sample = a_groups[-1]
-    nljs = [-model.log_joint(a_group=a_group).sum().item() for a_group in a_groups]
-    mcmc_info = dict(model_0=dict(mean_losses=nljs, min_losses=nljs, max_losses=nljs))
+    ljs = [model.log_joint(a_group=a_group).sum().item() for a_group in a_groups]
+    mcmc_info = dict(model_0=dict(mean_losses=ljs, min_losses=ljs, max_losses=ljs))
     return posterior_sample, UpdateResult(pcnets=None, log_weights=None, info=mcmc_info)
 
 
-def sample_weight_posterior(model: PCNetEnsemble, a_groups: List[ActivationGroup]
-                            ) -> List[torch.Tensor]:
+def sample_parameters_posterior(model: PCNetEnsemble, a_groups: List[ActivationGroup]
+                                ) -> Tuple[List[torch.Tensor], float]:
     """Update the new model on all activation groups then sample model parameters.
 
     Args:
@@ -86,12 +90,15 @@ def sample_weight_posterior(model: PCNetEnsemble, a_groups: List[ActivationGroup
         a_groups (List[ActivationGroup]): A list of activation groups.
 
     Returns:
-        List[torch.Tensor]: A list of sampled layer weights
+        List[torch.Tensor]: A list of sampled layer weights.
+        float: Log probability of the sampled layer weights.
     """
     pcnet = model._pcnets[0]
     for a_group in a_groups:
         pcnet.update_weights(a_group=a_group)
-    return model.sample_weights()
+    parameters_sample = model.sample_parameters()
+    parameters_log_prob = model.parameters_log_prob(parameters_sample=parameters_sample)
+    return parameters_sample, parameters_log_prob
 
 
 def train_gibbs(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], model: PCNetEnsemble,
@@ -137,9 +144,9 @@ def train_gibbs(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         prev_a_groups = a_groups
 
         # Sample network weights using conjugate Bayesian updates
-        layer_weights = sample_weight_posterior(model=model, a_groups=a_groups)
+        params_sample, params_log_prob = sample_parameters_posterior(model=model, a_groups=a_groups)
         model = deepcopy(model_template)
-        model.fix_weights(layer_weights=layer_weights)
+        model.fix_parameters(parameters=params_sample)
         models.append(model)
 
         # Evaluate model recall and log to wandb
@@ -147,7 +154,7 @@ def train_gibbs(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         wandb_dict = {"step": epoch}
         if (i % log_every) == 0:
             a_group_ljs = [ur.info["model_0"]["mean_losses"][-1] for ur in update_results]
-            wandb_dict["Gibbs -logp(x|W)"] = mean(a_group_ljs)
+            wandb_dict["Log Joint"] = sum(a_group_ljs) + params_log_prob
             result, pred_batch = score_data_batch(data_batch=data_batch, model=model,
                                                   acc_thresh=acc_thresh, n_repeat=n_repeat,
                                                   prefix='current')
@@ -160,11 +167,11 @@ def train_gibbs(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
             gen_img = generate_samples(model=model, X_shape=X_shape, d_batch=8,
                                        caption="Model samples via ancestral sampling.")
             log_joint_img = plot_update_energy(update_result=update_result,
-                                               caption="NUTS log joint curve (last batch).")
+                                               caption="NUTS Log Joint (last batch).")
             wandb_dict = {f"iteration/{k}": v for k, v in wandb_dict.items()}
             wandb_dict["Sample Image Denoising"] = sample_img
             wandb_dict["Generated Image"] = gen_img
-            wandb_dict["MH Log Joint Plot"] = log_joint_img
+            wandb_dict["NUTS Log Joint Plot"] = log_joint_img
             wandb_dict["Recall Energy Plot"] = recall_energy_img
             wandb.log(wandb_dict)
     return PCNetPosterior(ensembles=models[gibbs_burnin:])
@@ -253,9 +260,8 @@ def main_gibbs():
     wandb.define_metric("epoch/step")
     wandb.define_metric("epoch/*", step_metric="epoch/step")
     args = DotDict(wandb.config)
-    args.run_name = wandb.run.name
-    if args.path is None:
-        args.path = f'runs/{args.run_name}'
+    args.path = f'runs/{args.run_group}/{args.run_name}'
+    print(f"Saving models to directory: {args.path}")
 
     setup(args)
     learn_loaders, score_loaders, dataset_info = dataset_dispatcher(args)

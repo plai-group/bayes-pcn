@@ -94,7 +94,7 @@ class MHNUpdater(AbstractUpdater):
         for datapoint in X_obs:
             new_pcnet = deepcopy(self._pcnet_template)
             new_pcnet.device = X_obs.device
-            new_pcnet.layers[0].fix_weights(weights=deepcopy(datapoint))
+            new_pcnet.layers[0].fix_parameters(parameters=deepcopy(datapoint))
             new_pcnets.append(new_pcnet)
 
         # Set component importance appropriately

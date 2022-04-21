@@ -94,11 +94,15 @@ class AbstractPCLayer(ABC):
         self._update_strat = value
 
     @abstractmethod
-    def sample_weights(self) -> torch.Tensor:
+    def sample_parameters(self) -> torch.Tensor:
         raise NotImplementedError()
 
     @abstractmethod
-    def fix_weights(self, weights: torch.Tensor):
+    def fix_parameters(self, parameters: torch.Tensor):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def parameters_log_prob(self, parameters: torch.Tensor) -> float:
         raise NotImplementedError()
 
 
@@ -252,12 +256,19 @@ class PCLayer(AbstractPCLayer):
         self._U = (1-beta_forget)*self._U + beta_forget*self._U_original
         # self._U = self._U + (beta_forget ** 2) * torch.eye(self._U.shape[0]).to(self.device)
 
-    def sample_weights(self) -> torch.Tensor:
+    def sample_parameters(self) -> torch.Tensor:
         L = torch.linalg.cholesky(self._U)
         return self._R + L.matmul(torch.randn_like(self._R))
 
-    def fix_weights(self, weights: torch.Tensor):
-        self._R = weights
+    def parameters_log_prob(self, parameters: torch.Tensor) -> float:
+        n, p = self._R.shape
+        error = parameters - self._R
+        log_pdf = -0.5 * (error).matmul(self._U.inverse()).matmul(error).trace()
+        log_normalizer = (n*p/2)*(2*torch.pi).log() + (p/2)*torch.logdet(self._U)
+        return (log_pdf - log_normalizer).item()
+
+    def fix_parameters(self, parameters: torch.Tensor):
+        self._R = parameters
 
 
 class PCTopLayer(AbstractPCLayer):
@@ -301,6 +312,10 @@ class PCTopLayer(AbstractPCLayer):
             raise NotImplementedError()
         dist = dists.Normal(marginal_mean, marginal_Sigma ** 0.5)
         return dist.log_prob(X_obs).sum(dim=-1)
+
+    def parameters_log_prob(self, parameters: torch.Tensor) -> float:
+        dist = dists.MultivariateNormal(self._R, self._U)
+        return dist.log_prob(parameters).item()
 
     def predict(self, X_in: torch.Tensor = None, d_batch: int = None, **kwargs) -> torch.Tensor:
         if d_batch is None:
@@ -370,9 +385,9 @@ class PCTopLayer(AbstractPCLayer):
         self._U = (1-beta_forget)*self._U + beta_forget*self._U_original
         # self._U = self._U + (beta_forget ** 2) * torch.eye(self._U.shape[0]).to(self.device)
 
-    def sample_weights(self) -> torch.Tensor:
+    def sample_parameters(self) -> torch.Tensor:
         L = torch.linalg.cholesky(self._U)
         return self._R + L.matmul(torch.randn_like(self._R))
 
-    def fix_weights(self, weights: torch.Tensor):
-        self._R = weights
+    def fix_parameters(self, parameters: torch.Tensor):
+        self._R = parameters

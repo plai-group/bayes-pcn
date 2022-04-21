@@ -238,21 +238,30 @@ class PCNetEnsemble:
         for pcnet in self._pcnets:
             pcnet.layer_sample_strat = value
 
-    def sample_weights(self) -> List[torch.Tensor]:
+    def sample_parameters(self) -> List[torch.Tensor]:
         # For each layer in the PCNet, sample from normal / matrix normal
         assert len(self._pcnets) == 1
         layer_weights = []
         pcnet = self._pcnets[0]
         for layer in pcnet.layers:
-            weights = layer.sample_weights()
+            weights = layer.sample_parameters()
             layer_weights.append(weights)
         return layer_weights
 
-    def fix_weights(self, layer_weights: List[torch.Tensor]) -> None:
+    def parameters_log_prob(self, parameters_sample: List[torch.Tensor]) -> float:
+        # For each layer in the PCNet, sample from normal / matrix normal
+        assert len(self._pcnets) == 1
+        log_prob = 0.
+        pcnet = self._pcnets[0]
+        for layer in pcnet.layers:
+            layer.sample_parameters
+        return log_prob
+
+    def fix_parameters(self, parameters: List[torch.Tensor]) -> None:
         assert len(self._pcnets) == 1
         pcnet = self._pcnets[0]
-        for layer, weights in zip(pcnet.layers, layer_weights):
-            layer.fix_weights(weights=weights)
+        for layer, weights in zip(pcnet.layers, parameters):
+            layer.fix_parameters(parameters=weights)
 
 
 class PCNetPosterior:
