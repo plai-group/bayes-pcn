@@ -6,10 +6,10 @@ from typing import List, Union
 
 
 class ActivationGroup:
-    def __init__(self, activations: List[torch.Tensor], from_concatenated: bool = False) -> None:
+    def __init__(self, activations: List[torch.Tensor], no_param: bool = False) -> None:
         """Contains all layer-wise activations of PCNets within PCNetEnsemble. Makes things
         easier to work with PyTorch optimizers. Does not modify bottom-most activations.
-        NOTE: Layer activations are not parameters if from_concatenated is not true to
+        NOTE: Layer activations are not parameters if no_param is not true to
             have the method work with torch.autograd.hessian.
 
         Args:
@@ -18,12 +18,12 @@ class ActivationGroup:
                 The element tensor shapes should be <d_batch x d_layer>.
         """
         self._device: torch.device = torch.device('cpu')
-        self._original_obs: torch.Tensor = None if from_concatenated else deepcopy(activations[0])
-        layer_acts = activations[0] if from_concatenated else nn.Parameter(deepcopy(activations[0]))
+        self._original_obs: torch.Tensor = None if no_param else deepcopy(activations[0])
+        layer_acts = activations[0] if no_param else nn.Parameter(deepcopy(activations[0]))
         self._data: List[torch.Tensor] = [layer_acts]
         self._dims: List[int] = [activations[0].shape[-1]]
         for layer_acts in activations[1:]:
-            layer_acts = layer_acts if from_concatenated else nn.Parameter(deepcopy(layer_acts))
+            layer_acts = layer_acts if no_param else nn.Parameter(deepcopy(layer_acts))
             self._data.append(layer_acts)
             self._dims.append(layer_acts.shape[-1])
         self._d_batch: int = layer_acts.shape[0]
@@ -78,7 +78,7 @@ class ActivationGroup:
             layer_acts = activations[:, curr_loc:curr_loc+dim]
             separated.append(layer_acts)
             curr_loc = curr_loc + dim
-        return cls(activations=separated, from_concatenated=True)
+        return cls(activations=separated, no_param=True)
 
     @classmethod
     def merge(cls, a_groups: List['ActivationGroup']) -> 'ActivationGroup':

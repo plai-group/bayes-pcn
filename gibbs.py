@@ -53,24 +53,41 @@ def sample_activations_posterior(model: PCNetEnsemble, data_batch: DataBatch,
     # step_size=mh_step_size, adapt_step_size=False
     nuts_kernel = NUTS(model=model.sample, step_size=mh_step_size, full_mass=True,
                        adapt_step_size=False, adapt_mass_matrix=True, max_tree_depth=5)
+    # nuts_kernel = NUTS(model=model.sample, full_mass=True, max_tree_depth=5)
     mcmc = MCMC(
         nuts_kernel,
-        # num_samples=T_mh + 1,
-        # warmup_steps=0,
-        num_samples=9 * (T_mh//10) + 1,
-        warmup_steps=T_mh // 10,
+        num_samples=T_mh//10 + 1,
+        warmup_steps=9 * (T_mh//10),
+        # num_samples=9 * (T_mh//10) + 1,
+        # warmup_steps=T_mh // 10,
     )
     mcmc.run(a_group.d_batch, a_group)
     samples = mcmc.get_samples()
 
     # Format data into ActivationGroup and UpdateResult.
     hidden_kvs = sorted(list(samples.items()), key=lambda n: int(n[0].split('_')[-1]))
-    n_layers, n_samples = len(hidden_kvs), len(hidden_kvs[-1][-1])
-    all_activations = [[X_obs] for _ in range(n_samples)]
+    n_h_layers, n_samples, d_batch = len(hidden_kvs), len(hidden_kvs[-1][-1]), a_group.d_batch
+    # all_activations = [[X_obs] for _ in range(n_samples)]
+    # for i_sample in range(n_samples):
+    #     for i_layer in range(n_layers):
+    #         layer_acts = hidden_kvs[i_layer][-1][i_sample]
+    #         all_activations[i_sample].append(layer_acts)
+    # a_groups = [ActivationGroup(activations=activations) for activations in all_activations]
+    all_activations = []
     for i_sample in range(n_samples):
-        for i_layer in range(n_layers):
-            layer_acts = hidden_kvs[i_layer][-1][i_sample]
-            all_activations[i_sample].append(layer_acts)
+        activations = []
+        for i_h_layer in reversed(range(0, n_h_layers)):
+            layer_errs = hidden_kvs[i_h_layer][-1][i_sample]
+            if i_h_layer == n_h_layers-1:
+                pred_args = {"d_batch": d_batch}
+            else:
+                pred_args = {"X_in": activations[-1]}
+            layer_pred_mean = model._pcnets[0].layers[i_h_layer+1].predict(**pred_args)
+            layer_acts = layer_errs + layer_pred_mean
+            activations.append(layer_acts)
+        activations.append(X_obs)
+        all_activations.append(activations[::-1])
+
     a_groups = [ActivationGroup(activations=activations) for activations in all_activations]
     for a_group in a_groups:
         a_group.clamp(obs=True, hidden=True)
@@ -262,6 +279,8 @@ def main_gibbs():
     args = DotDict(wandb.config)
     args.path = f'runs/{args.run_group}/{args.run_name}'
     print(f"Saving models to directory: {args.path}")
+
+    args.n_batch = args.n_data  # FIXME: Experimental Change!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     setup(args)
     learn_loaders, score_loaders, dataset_info = dataset_dispatcher(args)

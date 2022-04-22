@@ -4,19 +4,23 @@ parameters:
   mh-step-size:
     values: [0.0001, 0.00005]
   act-fn:
-    values: ["none", "relu", "gelu"]
-  sigma-prior:
-    values: [0.1, 0.05]
-  sigma-obs:
-    values: [0.05, 0.01]
+    values: ["relu", "gelu"]
   T-mh:
     values: [100, 500]
+  n-layers:
+    value: [2, 3]
+  n-data:
+    values: [4, 128]
   run-group:
     value: "sweep-gibbs"
   wandb-mode:
     value: "online"
-  n-layers:
-    value: 2
+  sigma-prior:
+    value: 0.05
+  sigma-obs:
+    value: 0.01
+  sigma-data:
+    value: 0.005
   T-gibbs:
     value: 1000
   gibbs-burnin:
@@ -27,8 +31,6 @@ parameters:
     value: 1
   h-dim:
     value: 128
-  sigma-data:
-    value: 0.005
   layer-log-prob-strat:
     value: "map"
   layer-sample-strat:
@@ -43,10 +45,6 @@ parameters:
     value: "cifar10"
   dataset-mode:
     value: "mask"
-  n-data:
-    value: 4
-  n-batch:
-    value: 4
   activation-lr:
     value: 0.005
   T-infer:

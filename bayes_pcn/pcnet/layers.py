@@ -182,8 +182,10 @@ class PCLayer(AbstractPCLayer):
                 marginal_Sigma = marginal_Sigma.unsqueeze(-1)
             else:
                 raise NotImplementedError()
-            dist = pdists.Normal(marginal_mean, marginal_Sigma ** 0.5)
-            return pyro.sample(self._name, dist, obs=kwargs.get('X_obs', None))
+            dist = pdists.Normal(torch.zeros_like(marginal_mean), marginal_Sigma ** 0.5)
+            obs = None if kwargs.get('X_obs') is None else (kwargs['X_obs']-marginal_mean)
+            sample = marginal_mean + pyro.sample(self._name, dist, obs=obs)
+            return sample
 
     def _f(self, X_in: torch.Tensor) -> torch.Tensor:
         if self._act_fn == ActFn.NONE:
@@ -339,8 +341,10 @@ class PCTopLayer(AbstractPCLayer):
                 marginal_Sigma = self._Sigma + self._U[0, 0]
             else:
                 raise NotImplementedError()
-            dist = pdists.Normal(marginal_mean, marginal_Sigma ** 0.5)
-            return pyro.sample(self._name, dist, obs=kwargs.get('X_obs', None))
+            dist = pdists.Normal(torch.zeros_like(marginal_mean), marginal_Sigma ** 0.5)
+            obs = None if kwargs.get('X_obs') is None else (kwargs['X_obs']-marginal_mean)
+            sample = marginal_mean + pyro.sample(self._name, dist, obs=obs)
+            return sample
 
     def _ml_update(self, X_obs: torch.Tensor, **kwargs) -> None:
         """Take a gradient step for the network parameters self._R. The gradient is

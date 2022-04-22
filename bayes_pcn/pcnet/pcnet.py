@@ -38,7 +38,7 @@ class PCNet:
                 sample_args['X_obs'] = kwargs.get('X_obs', None)
             result = layer.sample(**sample_args)
             traces.append(result)
-        return result, ActivationGroup(activations=traces[::-1])
+        return result, ActivationGroup(activations=traces[::-1], no_param=True)
 
     def log_joint(self, a_group: ActivationGroup) -> torch.Tensor:
         """Return log joint of network layer activations.
