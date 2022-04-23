@@ -106,5 +106,6 @@ if __name__ == "__main__":
                               epoch=1, model=model, acc_thresh=loaded_args.acc_thresh,
                               n_repeat=loaded_args.n_repeat, fast_mode=args.fast_mode,
                               save_dir=save_dir)
+    result_dict["name"] = os.path.dirname(args.model_path).split('/')[-1]
     save_result(result=result_dict, path=f"{save_dir}/score.csv")
     wandb.finish()

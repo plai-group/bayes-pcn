@@ -1,10 +1,8 @@
 program: -mbayes_pcn
 method: grid
 parameters:
-  seed:
-    values: [0, 1, 2]
   h-dim:
-    values: [64, 256, 1024, 2048]
+    values: [256, 1024, 2048]
   act-fn:
     values: ["none", "relu", "gelu", "selu"]
   n-models:
@@ -13,20 +11,22 @@ parameters:
     values: [2, 4]
   ensemble-log-joint-strat:
     values: ["shared", "individual"]
+  sigma-prior:
+    values: [10., 1., 0.1]
+  seed:
+    value: 0
   run-group:
     value: "sweep-seq"
   wandb-mode:
     value: "online"
-  sigma-prior:
-    value: 1.
   sigma-obs:
-    value: 0.1
+    value: 0.01
   sigma-data:
     value: 0.01
   layer-log-prob-strat:
     value: "p_pred"
   layer-sample-strat:
-    value: "map"
+    value: "p_pred"
   layer-update-strat:
     value: "bayes"
   ensemble-proposal-strat:
@@ -46,6 +46,6 @@ parameters:
   T-infer:
     value: 1000
   log-every:
-    value: 16
+    value: 32
   save-every:
-    value: 16
+    value: 32

@@ -1,3 +1,4 @@
+project: "bayes-pcn-gibbs"
 program: gibbs.py
 method: grid
 parameters:
@@ -8,7 +9,7 @@ parameters:
   T-mh:
     values: [100, 500]
   n-layers:
-    value: [2, 3]
+    values: [2, 3]
   n-data:
     values: [4, 128]
   run-group:

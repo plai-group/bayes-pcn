@@ -1,6 +1,6 @@
+import multiprocessing
 from pyro.infer import MCMC, NUTS
 from pyro.infer.mcmc.util import initialize_model, summary
-from statistics import mean
 import torch
 from torch.utils.data import DataLoader
 import torchvision
@@ -26,9 +26,50 @@ def parse_args():
     return parser.parse_args()
 
 
-def sample_activations_posterior(model: PCNetEnsemble, data_batch: DataBatch,
-                                 prev_a_group: ActivationGroup, T_mh: int, mh_step_size: float,
-                                 ) -> Tuple[ActivationGroup, UpdateResult]:
+def sample_activations_posterior_data(args) -> List[List[torch.Tensor]]:
+    model, obs, a_group, T_mh, mh_step_size = args
+    # If applicable, warm start MCMC with previous iteration sample
+    a_group.clamp(obs=True, hidden=False)
+    a_group.device = model.device
+
+    # Run NUTS and take a single sample from the chain
+    # adapt_step_size=False, step_size=mh_step_size
+    nuts_kernel = NUTS(model=model.sample, full_mass=True, max_tree_depth=5)
+    mcmc = MCMC(
+        nuts_kernel,
+        num_samples=T_mh//10 + 1,
+        warmup_steps=9 * (T_mh//10),
+        disable_progbar=False
+    )
+    mcmc.run(a_group.d_batch, a_group)
+    samples = mcmc.get_samples()
+
+    # Format data into ActivationGroup and UpdateResult.
+    hidden_kvs = sorted(list(samples.items()), key=lambda n: int(n[0].split('_')[-1]))
+    n_h_layers, n_samples, d_batch = len(hidden_kvs), len(hidden_kvs[-1][-1]), a_group.d_batch
+
+    # Collect layer wise activations per sample
+    data_activations = []
+    for i_sample in range(n_samples):
+        activations = []
+        for i_h_layer in reversed(range(0, n_h_layers)):
+            layer_errs = hidden_kvs[i_h_layer][-1][i_sample]
+            if i_h_layer == n_h_layers-1:
+                pred_args = {"d_batch": d_batch}
+            else:
+                pred_args = {"X_in": activations[-1]}
+            layer_pred_mean = model._pcnets[0].layers[i_h_layer+1].predict(**pred_args)
+            layer_acts = layer_errs + layer_pred_mean
+            activations.append(layer_acts)
+        activations.append(obs)
+        data_activations.append(activations[::-1])
+    return data_activations
+
+
+def sample_activations_posterior_mp(model: PCNetEnsemble, data_batch: DataBatch,
+                                    prev_a_group: ActivationGroup, T_mh: int,
+                                    mh_step_size: float,
+                                    ) -> Tuple[ActivationGroup, UpdateResult]:
     """Sample all layer activations for current data batch. Activations include
     the observed layer activations.
 
@@ -42,53 +83,35 @@ def sample_activations_posterior(model: PCNetEnsemble, data_batch: DataBatch,
     """
     # Warm start NUTS on previous chain sample
     X_obs = data_batch.train[0]
-    if prev_a_group is None:
-        a_group = model.initialize_activation_group(X_obs=X_obs)
-    else:
-        a_group = prev_a_group
-    a_group.clamp(obs=True, hidden=False)
-    a_group.device = model.device
-
-    # Run NUTS and take a single sample from the chain
-    # step_size=mh_step_size, adapt_step_size=False
-    nuts_kernel = NUTS(model=model.sample, step_size=mh_step_size, full_mass=True,
-                       adapt_step_size=False, adapt_mass_matrix=True, max_tree_depth=5)
-    # nuts_kernel = NUTS(model=model.sample, full_mass=True, max_tree_depth=5)
-    mcmc = MCMC(
-        nuts_kernel,
-        num_samples=T_mh//10 + 1,
-        warmup_steps=9 * (T_mh//10),
-        # num_samples=9 * (T_mh//10) + 1,
-        # warmup_steps=T_mh // 10,
-    )
-    mcmc.run(a_group.d_batch, a_group)
-    samples = mcmc.get_samples()
-
-    # Format data into ActivationGroup and UpdateResult.
-    hidden_kvs = sorted(list(samples.items()), key=lambda n: int(n[0].split('_')[-1]))
-    n_h_layers, n_samples, d_batch = len(hidden_kvs), len(hidden_kvs[-1][-1]), a_group.d_batch
-    # all_activations = [[X_obs] for _ in range(n_samples)]
-    # for i_sample in range(n_samples):
-    #     for i_layer in range(n_layers):
-    #         layer_acts = hidden_kvs[i_layer][-1][i_sample]
-    #         all_activations[i_sample].append(layer_acts)
-    # a_groups = [ActivationGroup(activations=activations) for activations in all_activations]
+    n_data = len(X_obs)
     all_activations = []
-    for i_sample in range(n_samples):
-        activations = []
-        for i_h_layer in reversed(range(0, n_h_layers)):
-            layer_errs = hidden_kvs[i_h_layer][-1][i_sample]
-            if i_h_layer == n_h_layers-1:
-                pred_args = {"d_batch": d_batch}
-            else:
-                pred_args = {"X_in": activations[-1]}
-            layer_pred_mean = model._pcnets[0].layers[i_h_layer+1].predict(**pred_args)
-            layer_acts = layer_errs + layer_pred_mean
-            activations.append(layer_acts)
-        activations.append(X_obs)
-        all_activations.append(activations[::-1])
 
-    a_groups = [ActivationGroup(activations=activations) for activations in all_activations]
+    inputs = []
+    for i_data in range(n_data):
+        obs = X_obs[i_data:i_data+1]
+        if prev_a_group is None:
+            a_group = model.initialize_activation_group(X_obs=obs)
+        else:
+            a_group = ActivationGroup(activations=prev_a_group.get_datapoint(data_index=i_data))
+        inputs.append((model, obs, a_group, T_mh, mh_step_size))
+    all_activations = [sample_activations_posterior_data(args=args) for args in inputs]
+    # import time
+    # start = time.time()
+    # pool_obj = multiprocessing.Pool(processes=2)
+    # all_activations = pool_obj.map(sample_activations_posterior_data, inputs)
+    # elapsed = time.time() - start
+    # print(elapsed)
+    # pool_obj.terminate()
+
+    n_samples, n_layers = len(all_activations[0]), len(all_activations[0][0])
+    formatted = [[[] for _ in range(n_layers)] for _ in range(n_samples)]
+    for data_activations in all_activations:
+        for i_sample in range(n_samples):
+            for i_layer in range(n_layers):
+                formatted[i_sample][i_layer].append(data_activations[i_sample][i_layer])
+    formatted = [[torch.cat(layer_acts, dim=0) for layer_acts in acts] for acts in formatted]
+
+    a_groups = [ActivationGroup(activations=activations) for activations in formatted]
     for a_group in a_groups:
         a_group.clamp(obs=True, hidden=True)
         a_group.device = model.device
@@ -151,11 +174,11 @@ def train_gibbs(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         for i in range(0, len(train_loader)):
             data_batch = get_next_data_batch(train_loader=train_loader, test_loaders=test_loaders)
             prev_a_group = prev_a_groups[i] if len(prev_a_groups) > i else None
-            a_group, update_result = sample_activations_posterior(model=model,
-                                                                  data_batch=data_batch,
-                                                                  prev_a_group=prev_a_group,
-                                                                  T_mh=T_mh,
-                                                                  mh_step_size=mh_step_size)
+            a_group, update_result = sample_activations_posterior_mp(model=model,
+                                                                     data_batch=data_batch,
+                                                                     prev_a_group=prev_a_group,
+                                                                     T_mh=T_mh,
+                                                                     mh_step_size=mh_step_size)
             a_groups.append(a_group)
             update_results.append(update_result)
         prev_a_groups = a_groups

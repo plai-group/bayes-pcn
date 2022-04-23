@@ -32,12 +32,13 @@ class PCNet:
         """
         result = None
         traces = []
-        for i, layer in enumerate(reversed(self.layers)):
-            sample_args = dict(d_batch=d_batch, X_in=result)
-            if i == len(self.layers) - 1:
-                sample_args['X_obs'] = kwargs.get('X_obs', None)
-            result = layer.sample(**sample_args)
-            traces.append(result)
+        with pyro.plate(f"plate", size=d_batch, dim=-2):
+            for i, layer in enumerate(reversed(self.layers)):
+                sample_args = dict(d_batch=d_batch, X_in=result)
+                if i == len(self.layers) - 1:
+                    sample_args['X_obs'] = kwargs.get('X_obs', None)
+                result = layer.sample(**sample_args)
+                traces.append(result)
         return result, ActivationGroup(activations=traces[::-1], no_param=True)
 
     def log_joint(self, a_group: ActivationGroup) -> torch.Tensor:

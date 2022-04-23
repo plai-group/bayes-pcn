@@ -171,21 +171,19 @@ class PCLayer(AbstractPCLayer):
         Returns:
             torch.Tensor: Sampled lower layer neuron values of shape <d_batch x d_out>.
         """
-        d_batch = X_in.shape[0]
-        with pyro.plate(f"plate_{self._name}", size=d_batch, dim=-2):
-            marginal_mean = self.predict(X_in=X_in)
-            if self._sample_strat == LayerSampleStrat.MAP:
-                marginal_Sigma = self._Sigma
-            elif self._sample_strat == LayerSampleStrat.P_PRED:
-                Z_in = self._f(X_in)
-                marginal_Sigma = self._Sigma + Z_in.matmul(self._U).matmul(Z_in.T).diag()
-                marginal_Sigma = marginal_Sigma.unsqueeze(-1)
-            else:
-                raise NotImplementedError()
-            dist = pdists.Normal(torch.zeros_like(marginal_mean), marginal_Sigma ** 0.5)
-            obs = None if kwargs.get('X_obs') is None else (kwargs['X_obs']-marginal_mean)
-            sample = marginal_mean + pyro.sample(self._name, dist, obs=obs)
-            return sample
+        marginal_mean = self.predict(X_in=X_in)
+        if self._sample_strat == LayerSampleStrat.MAP:
+            marginal_Sigma = self._Sigma
+        elif self._sample_strat == LayerSampleStrat.P_PRED:
+            Z_in = self._f(X_in)
+            marginal_Sigma = self._Sigma + Z_in.matmul(self._U).matmul(Z_in.T).diag()
+            marginal_Sigma = marginal_Sigma.unsqueeze(-1)
+        else:
+            raise NotImplementedError()
+        dist = pdists.Normal(torch.zeros_like(marginal_mean), marginal_Sigma ** 0.5)
+        obs = None if kwargs.get('X_obs') is None else (kwargs['X_obs']-marginal_mean)
+        sample = marginal_mean + pyro.sample(self._name, dist, obs=obs)
+        return sample
 
     def _f(self, X_in: torch.Tensor) -> torch.Tensor:
         if self._act_fn == ActFn.NONE:
@@ -333,18 +331,16 @@ class PCTopLayer(AbstractPCLayer):
             torch.Tensor: Sampled lower layer neuron values of shape <d_batch x d_out>.
         """
         marginal_mean = self.predict(**kwargs)
-        d_batch = marginal_mean.shape[0]
-        with pyro.plate(f"plate_{self._name}", size=d_batch, dim=-2):
-            if self._sample_strat == LayerSampleStrat.MAP:
-                marginal_Sigma = self._Sigma
-            elif self._sample_strat == LayerSampleStrat.P_PRED:
-                marginal_Sigma = self._Sigma + self._U[0, 0]
-            else:
-                raise NotImplementedError()
-            dist = pdists.Normal(torch.zeros_like(marginal_mean), marginal_Sigma ** 0.5)
-            obs = None if kwargs.get('X_obs') is None else (kwargs['X_obs']-marginal_mean)
-            sample = marginal_mean + pyro.sample(self._name, dist, obs=obs)
-            return sample
+        if self._sample_strat == LayerSampleStrat.MAP:
+            marginal_Sigma = self._Sigma
+        elif self._sample_strat == LayerSampleStrat.P_PRED:
+            marginal_Sigma = self._Sigma + self._U[0, 0]
+        else:
+            raise NotImplementedError()
+        dist = pdists.Normal(torch.zeros_like(marginal_mean), marginal_Sigma ** 0.5)
+        obs = None if kwargs.get('X_obs') is None else (kwargs['X_obs']-marginal_mean)
+        sample = marginal_mean + pyro.sample(self._name, dist, obs=obs)
+        return sample
 
     def _ml_update(self, X_obs: torch.Tensor, **kwargs) -> None:
         """Take a gradient step for the network parameters self._R. The gradient is
