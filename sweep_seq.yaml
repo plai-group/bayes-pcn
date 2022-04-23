@@ -1,3 +1,4 @@
+project: "bayes-pcn-seq"
 program: -mbayes_pcn
 method: grid
 parameters:
