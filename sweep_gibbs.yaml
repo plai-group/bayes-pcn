@@ -3,29 +3,29 @@ program: gibbs.py
 method: grid
 parameters:
   mh-step-size:
-    values: [0.0001, 0.00005]
-  act-fn:
-    values: ["relu", "gelu"]
-  T-mh:
-    values: [100, 500]
+    values: [0., 0.001]
   n-layers:
-    values: [2, 3]
+    values: [2, 4]
   n-data:
-    values: [4, 128]
+    values: [4, 32, 128]
+  T-mh:
+    value: 100
+  act-fn:
+    value: "selu"
   run-group:
-    value: "sweep-gibbs"
+    value: "sweep-gibbs-2"
   wandb-mode:
     value: "online"
   sigma-prior:
-    value: 0.05
+    value: 0.1
   sigma-obs:
     value: 0.01
   sigma-data:
-    value: 0.005
+    value: 0.01
   T-gibbs:
     value: 1000
   gibbs-burnin:
-    value: 100
+    value: 500
   seed:
     value: 0
   n-models:

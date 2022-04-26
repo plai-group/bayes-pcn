@@ -34,7 +34,12 @@ def sample_activations_posterior_data(args) -> List[List[torch.Tensor]]:
 
     # Run NUTS and take a single sample from the chain
     # adapt_step_size=False, step_size=mh_step_size
-    nuts_kernel = NUTS(model=model.sample, full_mass=True, max_tree_depth=5)
+    if mh_step_size > 0.:
+        nuts_args = dict(model=model.sample, full_mass=True, max_tree_depth=5,
+                         adapt_step_size=False, step_size=mh_step_size)
+    else:
+        nuts_args = dict(model=model.sample, full_mass=True, max_tree_depth=5)
+    nuts_kernel = NUTS(**nuts_args)
     mcmc = MCMC(
         nuts_kernel,
         num_samples=T_mh//10 + 1,
@@ -284,14 +289,6 @@ def run_gibbs(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, Dat
 
 
 def main_gibbs():
-    """
-    Sample Command:
-    python -m bayes_pcn.gibbs --path=runs/gibbs --wandb-mode=offline --T-gibbs=1000 --gibbs-burnin=1
-    --T-mh=100 --mh-step-size=0.0001 --activation-lr=0.0005 --T-infer=1000 --sigma-prior=0.5
-    --sigma-obs=0.05 --sigma-data=0.05 --h-dim=64 --layer-update-strat=bayes
-    --ensemble-log-joint-strat=shared --ensemble-proposal-strat=full --act-fn=relu
-    --n-models=1 --n-layers=2 --n-repeat=1 --dataset-mode=mask --n-data=2 --n-batch=2
-    """
     args = parse_args()
     os.environ["WANDB_MODE"] = args.wandb_mode
     wandb.init(project="bayes_pcn", entity="jasonyoo", config=args)
@@ -300,6 +297,7 @@ def main_gibbs():
     wandb.define_metric("epoch/step")
     wandb.define_metric("epoch/*", step_metric="epoch/step")
     args = DotDict(wandb.config)
+    wandb.run.name = wandb.run_name if args.run_name is None else args.run_name
     args.path = f'runs/{args.run_group}/{args.run_name}'
     print(f"Saving models to directory: {args.path}")
 

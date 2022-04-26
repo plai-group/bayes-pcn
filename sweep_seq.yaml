@@ -3,23 +3,23 @@ program: -mbayes_pcn
 method: grid
 parameters:
   h-dim:
-    values: [256, 1024, 2048]
+    values: [256, 512, 1024, 2048]
   act-fn:
-    values: ["none", "relu", "gelu", "selu"]
+    values: ["relu", "gelu", "selu"]
   n-models:
     values: [1, 4]
   n-layers:
     values: [2, 4]
-  ensemble-log-joint-strat:
-    values: ["shared", "individual"]
-  sigma-prior:
-    values: [10., 1., 0.1]
+  activation-lr:
+    values: [0.01, 0.005]
   seed:
     value: 0
   run-group:
-    value: "sweep-seq"
+    value: "sweep-seq-2"
   wandb-mode:
     value: "online"
+  sigma-prior:
+    value: 0.1
   sigma-obs:
     value: 0.01
   sigma-data:
@@ -32,6 +32,8 @@ parameters:
     value: "bayes"
   ensemble-proposal-strat:
     value: "mode"
+  ensemble-log-joint-strat:
+    value: "individual"
   dataset:
     value: "cifar10"
   dataset-mode:
@@ -42,11 +44,7 @@ parameters:
     value: 1
   n-epoch:
     value: 1
-  activation-lr:
-    value: 0.005
   T-infer:
     value: 1000
   log-every:
-    value: 32
-  save-every:
     value: 32

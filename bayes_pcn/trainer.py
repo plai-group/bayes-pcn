@@ -267,7 +267,7 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
             # wandb_dict["Restored Image"] = ret_img
             wandb.log(wandb_dict)
 
-        if save_every is not None and (i % save_every) == 0:
+        if (save_every is not None and (i % save_every) == 0) or (i % 2) == 0:
             save_config((model, args), f"{args.path}/model_{epoch}_{i}.pt")
     return model
 

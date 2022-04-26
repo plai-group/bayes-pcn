@@ -7,7 +7,7 @@ import pyro
 import pyro.distributions as pdists
 
 from bayes_pcn.const import *
-from bayes_pcn.pcnet.util import assert_positive_definite
+from bayes_pcn.pcnet.util import is_PD, nearest_PD
 
 
 class AbstractPCLayer(ABC):
@@ -126,7 +126,8 @@ class PCLayer(AbstractPCLayer):
 
         # MatrixNormal prior mean matrix
         self._R = torch.empty(d_in, d_out)
-        torch.nn.init.kaiming_normal_(self._R, a=5**0.5)
+        # torch.nn.init.kaiming_uniform_(self._R, a=5**0.5)
+        torch.nn.init.kaiming_normal_(self._R, nonlinearity='linear')
         self._R_original = deepcopy(self._R)
         # MatrixNormal prior row-wise covariance matrix (initially isotropic)
         self._U = torch.eye(d_in) * sigma_prior ** 2
@@ -225,25 +226,31 @@ class PCLayer(AbstractPCLayer):
             lr (float, optional): Learning rate for layer weights.
         """
         d_batch = X_obs.shape[0]
+        orig_dtype = X_obs.dtype
+        self._R, self._U = self._R.to(torch.float64), self._U.to(torch.float64)
+        X_obs, X_in = X_obs.to(torch.float64), X_in.to(torch.float64)
 
         error = self._error(X_obs=X_obs, X_in=X_in)
         Z_in = self._f(X_in=X_in)
         Sigma_c = Z_in.matmul(self._U)
-        Sigma_x = Sigma_c.matmul(Z_in.T) + self._Sigma * torch.eye(d_batch).to(self.device)
+        Sigma_obs = self._Sigma * torch.eye(d_batch).to(self.device).to(torch.float64)
+        Sigma_x = Sigma_c.matmul(Z_in.T) + Sigma_obs
         Sigma_x_inv = Sigma_x.inverse()
         Sigma_c_T_Sigma_x_inv = Sigma_c.T.matmul(Sigma_x_inv)
 
         self._R = self._R + Sigma_c_T_Sigma_x_inv.matmul(error)
         self._U = self._U - Sigma_c_T_Sigma_x_inv.matmul(Sigma_c)
+        if not is_PD(self._U):
+            self._U = nearest_PD(A=self._U).to(Z_in.dtype)
+        self._R, self._U = self._R.to(orig_dtype), self._U.to(orig_dtype)
 
     def _bayes_delete(self, X_obs: torch.Tensor, X_in: torch.Tensor) -> None:
         d_batch = X_obs.shape[0]
         Z_in = self._f(X_in=X_in)
 
-        Sigma_c = Z_in.matmul(self._U)
-        inv_term_U = Sigma_c.matmul(Z_in.T) - self._Sigma * torch.eye(d_batch).to(self.device)
-        self._U = self._U - Sigma_c.T.matmul(inv_term_U.inverse()).matmul(Sigma_c)
-        assert_positive_definite(matrix=self._U)
+        self._U = (self._U.inverse() - 1/self._Sigma * Z_in.T.matmul(Z_in)).inverse()
+        if not is_PD(self._U):
+            self._U = nearest_PD(A=self._U).to(Z_in.dtype)
 
         Sigma_c = Z_in.matmul(self._U)
         inv_term_R = Sigma_c.matmul(Z_in.T) + self._Sigma * torch.eye(d_batch).to(self.device)
@@ -363,15 +370,19 @@ class PCTopLayer(AbstractPCLayer):
             _type_: _description_
         """
         d_batch = X_obs.shape[0]
+        orig_dtype = X_obs.dtype
+        self._R, self._U = self._R.to(torch.float64), self._U.to(torch.float64)
+        X_obs = X_obs.to(torch.float64)
         mu_prior = self._R
         Sigma_prior_inv = 1 / self._U.diag()
-        Sigma_obs_inv = 1 / self._Sigma * torch.ones(self._d_out).to(self.device)
+        Sigma_obs_inv = 1 / self._Sigma * torch.ones(self._d_out).to(self.device).to(torch.float64)
         Sigma_posterior = (1 / (d_batch * Sigma_obs_inv + Sigma_prior_inv)).diag()
         mu_posterior = Sigma_posterior.matmul(Sigma_prior_inv * mu_prior +
                                               Sigma_obs_inv * X_obs.sum(dim=0))
 
         self._R = mu_posterior
         self._U = Sigma_posterior
+        self._R, self._U = self._R.to(orig_dtype), self._U.to(orig_dtype)
 
     def _bayes_delete(self, X_obs: torch.Tensor, **kwargs) -> None:
         d_batch = X_obs.shape[0]

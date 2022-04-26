@@ -74,8 +74,8 @@ def get_parser() -> argparse.ArgumentParser:
 
     # eval configs
     parser.add_argument('--recall-threshold', type=float, default=0.005)
-    parser.add_argument('--log-every', type=int, default=1, help="Log every this # of iterations")
-    parser.add_argument('--save-every', type=int, default=2, help="Save every this # of iterations")
+    parser.add_argument('--log-every', type=int, default=1, help="Log every this # iterations")
+    parser.add_argument('--save-every', type=int, default=None, help="Save every this # iterations")
     return parser
 
 
@@ -167,7 +167,9 @@ def main():
     wandb.define_metric("epoch/step")
     wandb.define_metric("epoch/*", step_metric="epoch/step")
     args = DotDict(wandb.config)
-    args.run_name = wandb.run.id if args.run_name is None else args.run_name
+    if args.run_name is None:
+        args.run_name = f"{args.seed}h{args.h_dim}l{args.n_layers}m{args.n_models}_{wandb.run.id}"
+    wandb.run.name = args.run_name
     args.path = f'runs/{args.run_group}/{args.run_name}'
     print(f"Saving models to directory: {args.path}")
 
