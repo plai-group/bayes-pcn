@@ -298,6 +298,11 @@ def main_gibbs():
     wandb.define_metric("epoch/*", step_metric="epoch/step")
     args = DotDict(wandb.config)
     wandb.run.name = wandb.run.name if args.run_name is None else args.run_name
+    args.run_name = wandb.run.name if args.run_name is None else args.run_name
+    if args.run_name is None:
+        name = f"t{args.T_mh}l{args.n_layers}s{args.sigma_prior}{args.act_fn}_{wandb.run.id}"
+        args.run_name = name
+    wandb.run.name = args.run_name
     args.path = f'runs/{args.run_group}/{args.run_name}'
     print(f"Saving models to directory: {args.path}")
 
