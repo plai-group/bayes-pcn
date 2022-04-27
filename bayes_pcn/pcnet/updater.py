@@ -97,16 +97,15 @@ class MHNUpdater(AbstractUpdater):
             new_pcnet.layers[0].fix_parameters(parameters=deepcopy(datapoint))
             new_pcnets.append(new_pcnet)
 
-        # Set component importance appropriately
+        # Set component importance appropriately (should be unnormalized for MHN)
         if self._metric == 'euclidean':
-            log_weights = (torch.ones(len(new_pcnets)) / len(new_pcnets)).log()
+            log_weights = torch.ones(len(new_pcnets)).to(X_obs.device)
         elif self._metric == 'dot':
-            key_sq_norms = [(pcnet.layers[0]._R.norm(p=2) ** 2).item() for pcnet in new_pcnets]
-            log_weights = torch.tensor(key_sq_norms).log()
-            log_weights = log_weights - log_weights.logsumexp(dim=0)
+            beta = new_pcnets[0].layers[0]._Sigma ** -0.5
+            key_sq_norms = [beta*(pcnet.layers[0]._R.norm(p=2)**2).item() for pcnet in new_pcnets]
+            log_weights = torch.tensor(key_sq_norms).to(X_obs.device)
         else:
             raise NotImplementedError()
-        log_weights = log_weights.to(X_obs.device)
         return UpdateResult(pcnets=new_pcnets, log_weights=log_weights, info=info)
 
 
@@ -168,9 +167,9 @@ class AbstractVLBUpdater(AbstractUpdater):
                 new_log_weights.append(new_log_weight)
                 fit_info[f"model_{j}"] = stat_model
                 j = j + 1
+        # HACK: renormalize twice to correct numerical error
         new_log_weights = torch.tensor(new_log_weights).to(log_weights.device)
         new_log_weights = new_log_weights - torch.logsumexp(new_log_weights, dim=-1)
-        # HACK: renormalize again to correct numerical error
         new_log_weights = new_log_weights - torch.logsumexp(new_log_weights, dim=-1)
 
         # Optionally perform ESS resampling step here, modifying both pcnets and log_weights

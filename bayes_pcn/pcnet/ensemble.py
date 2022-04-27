@@ -170,7 +170,7 @@ class PCNetEnsemble:
             (Sample): Sample object with <d_batch x x_dim> data and <d_batch> log joint tensors.
         """
         info = []
-        weights = self._log_weights.exp()
+        weights = (self._log_weights - self._log_weights.logsumexp(dim=0)).exp()
         model_indices = torch.multinomial(weights, num_samples=d_batch, replacement=True)
         indices, counts = model_indices.unique(return_counts=True)
         for index, count in zip(indices.tolist(), counts.tolist()):

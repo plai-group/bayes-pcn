@@ -19,7 +19,7 @@ TLDR: Used for evaluating trained model performance.
 Load a trained model and log its performance on al train/test batches to wandb.
 Test dataloaders don't have to be the same as one used while training.
 
-Usage: `python score.py --path=...`
+Usage: `python score.py --model-path=...`
 """
 
 
@@ -29,6 +29,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument('--dataset-mode', type=str, default='all',
                         choices=['fast', 'mix', 'white', 'drop', 'mask', 'all'],
                         help='Specifies test dataset configuration.')
+    parser.add_argument('--n-data', type=int, default=None)
     parser.add_argument('--n-repeat', type=int, default=1)
     parser.add_argument('--acc-thresh', type=float, default=0.005)
     parser.add_argument('--cuda', action='store_true', help='Use GPU if available.')
@@ -89,6 +90,9 @@ if __name__ == "__main__":
     loaded_args.dataset_mode = args.dataset_mode
     loaded_args.n_repeat = args.n_repeat
     loaded_args.acc_thresh = args.acc_thresh
+    if args.n_data is not None:
+        loaded_args.n_data = args.n_data
+        loaded_args.n_batch = min(loaded_args.n_batch, args.n_data)
     if loaded_args.cuda and torch.cuda.device_count() > 0:
         model.device = torch.device('cuda')
 

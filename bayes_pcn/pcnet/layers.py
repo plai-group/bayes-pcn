@@ -246,6 +246,9 @@ class PCLayer(AbstractPCLayer):
 
     def _bayes_delete(self, X_obs: torch.Tensor, X_in: torch.Tensor) -> None:
         d_batch = X_obs.shape[0]
+        orig_dtype = X_obs.dtype
+        self._R, self._U = self._R.to(torch.float64), self._U.to(torch.float64)
+        X_obs, X_in = X_obs.to(torch.float64), X_in.to(torch.float64)
         Z_in = self._f(X_in=X_in)
 
         self._U = (self._U.inverse() - 1/self._Sigma * Z_in.T.matmul(Z_in)).inverse()
@@ -257,6 +260,7 @@ class PCLayer(AbstractPCLayer):
         R_term_1 = torch.eye(self._d_in) + 1/self._Sigma * Sigma_c.T.matmul(Z_in)
         R_term_2 = self._R - Sigma_c.T.matmul(inv_term_R.inverse()).matmul(X_obs)
         self._R = R_term_1.matmul(R_term_2)
+        self._R, self._U = self._R.to(orig_dtype), self._U.to(orig_dtype)
 
     def _bayes_forget(self, beta_forget: float) -> None:
         self._R = (1-beta_forget)**0.5*self._R + (1-(1-beta_forget)**0.5)*self._R_original
@@ -386,10 +390,13 @@ class PCTopLayer(AbstractPCLayer):
 
     def _bayes_delete(self, X_obs: torch.Tensor, **kwargs) -> None:
         d_batch = X_obs.shape[0]
+        orig_dtype = X_obs.dtype
+        self._R, self._U = self._R.to(torch.float64), self._U.to(torch.float64)
         Sigma_posterior = self._U
         self._U = (1/self._U - d_batch/self._Sigma) ** -1
         self._R = self._U[0, 0]/Sigma_posterior[0, 0] * self._R\
             - self._U[0, 0]/self._Sigma * X_obs.mean(dim=0)
+        self._R, self._U = self._R.to(orig_dtype), self._U.to(orig_dtype)
 
     def _bayes_forget(self, beta_forget: float) -> None:
         self._R = (1-beta_forget)**0.5*self._R + (1-(1-beta_forget)**0.5)*self._R_original

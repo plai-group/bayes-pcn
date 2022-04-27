@@ -2,22 +2,22 @@ project: "bayes-pcn-gibbs"
 program: gibbs.py
 method: grid
 parameters:
-  mh-step-size:
-    values: [0., 0.001]
   n-layers:
     values: [2, 4]
   n-data:
-    values: [4, 32, 128]
+    values: [4, 32, 64, 128]
   T-mh:
-    value: 100
+    values: [100, 250]
   act-fn:
-    value: "selu"
+    values: ["gelu", "selu"]
+  sigma-prior:
+    values: [0.1, 0.05]
+  mh-step-size:
+    value: 0.
   run-group:
     value: "sweep-gibbs-2"
   wandb-mode:
     value: "online"
-  sigma-prior:
-    value: 0.1
   sigma-obs:
     value: 0.01
   sigma-data:
@@ -31,7 +31,7 @@ parameters:
   n-models:
     value: 1
   h-dim:
-    value: 128
+    value: 256
   layer-log-prob-strat:
     value: "map"
   layer-sample-strat:
@@ -50,3 +50,5 @@ parameters:
     value: 0.005
   T-infer:
     value: 1000
+  log-every:
+    value: 8

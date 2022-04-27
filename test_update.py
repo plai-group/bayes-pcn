@@ -1,6 +1,6 @@
 """
 TODO
-== Delete ==
+== update ==
 Load trained model
 Evaluate performance on all datapoints
 Remove a datapoint
@@ -36,8 +36,8 @@ from bayes_pcn.util import load_config, save_result, setup
 def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument('--model-path', type=str, required=True)
-    parser.add_argument('--delete-index', type=int, default=0,
-                        help='denotes which batch index to delete (starts at 0).')
+    parser.add_argument('--update-index', type=int, default=0,
+                        help='denotes which batch index to update (starts at 0).')
     parser.add_argument('--dataset-mode', type=str, default='fast',
                         choices=['fast', 'mix', 'white', 'drop', 'mask', 'all'],
                         help='Specifies test dataset configuration.')
@@ -48,11 +48,11 @@ def get_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def get_delete_batch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader],
-                     delete_index: int) -> DataBatch:
+def get_update_batch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader],
+                     update_index: int) -> DataBatch:
     train_loader = iter(train_loader)
     test_loaders = {name: iter(test_loader) for name, test_loader in test_loaders.items()}
-    for _ in range(delete_index+1):
+    for _ in range(update_index+1):
         data_batch = get_next_data_batch(train_loader=train_loader, test_loaders=test_loaders)
     return data_batch
 
@@ -113,7 +113,7 @@ if __name__ == "__main__":
     if loaded_args.cuda and torch.cuda.device_count() > 0:
         model.device = torch.device('cuda')
 
-    wandb.init(project="bayes-pcn-delete", entity="jasonyoo", config=loaded_args)
+    wandb.init(project="bayes-pcn-update", entity="jasonyoo", config=loaded_args)
     wandb.define_metric("iteration/z_step")
     wandb.define_metric("iteration/*", step_metric="iteration/z_step")
     wandb.define_metric("epoch/z_step")
@@ -122,38 +122,42 @@ if __name__ == "__main__":
     learn_loaders, score_loaders, dataset_info = dataset_dispatcher(args=loaded_args)
     train_loader, test_loaders = separate_train_test(loaders=learn_loaders)
 
-    # Score all but delete batch
+    # Score all but update batch
     result_dict_1 = score_epoch(train_loader=train_loader, test_loaders=test_loaders,
                                 epoch=1, model=model, acc_thresh=loaded_args.recall_threshold,
-                                n_repeat=loaded_args.n_repeat, omit_index=args.delete_index,
+                                n_repeat=loaded_args.n_repeat, omit_index=args.update_index,
                                 save_dir=save_dir, caption='prev')
 
-    # Score delete batch, delete data, and score it again
-    delete_batch = get_delete_batch(train_loader=train_loader, test_loaders=test_loaders,
-                                    delete_index=args.delete_index)
-    result_1, pred_batch_1 = score_data_batch(data_batch=delete_batch, model=model,
+    # Score update batch, update data, and score it again
+    update_batch = get_update_batch(train_loader=train_loader, test_loaders=test_loaders,
+                                    update_index=args.update_index)
+    # TODO: CREATE A NEW BATCH HERE THAT COMBINES UPDATEBATCH DATA WITH THE FIRST FROG IMAGE
+    # AND MASKS OUT APPROPRIATE COLUMNS BY LOOKING AT fixed_indices!!!!!!!!!!!!!!!!!!!!!!!!!
+    new_batch = get_update_batch(train_loader=train_loader, test_loaders=test_loaders,
+                                 update_index=args.update_index)
+    result_1, pred_batch_1 = score_data_batch(data_batch=update_batch, model=model,
                                               acc_thresh=loaded_args.recall_threshold,
                                               n_repeat=args.n_repeat)
     recall_img_1 = plot_data_batch(data_batch=pred_batch_1)
     result_1 = {k: round(v, 5) for k, v in result_1.items() if 'mse' in k}
-    model.delete(X_obs=delete_batch.train[0])
-    result_2, pred_batch_2 = score_data_batch(data_batch=delete_batch, model=model,
+    model.update(X_obs=update_batch.train[0])
+    result_2, pred_batch_2 = score_data_batch(data_batch=new_batch, model=model,
                                               acc_thresh=loaded_args.recall_threshold,
                                               n_repeat=args.n_repeat)
     recall_img_2 = plot_data_batch(data_batch=pred_batch_2)
     result_2 = {k: round(v, 5) for k, v in result_2.items() if 'mse' in k}
 
-    # Score all but delete batch
+    # Score all but update batch
     result_dict_2 = score_epoch(train_loader=train_loader, test_loaders=test_loaders,
                                 epoch=2, model=model, acc_thresh=loaded_args.recall_threshold,
-                                n_repeat=loaded_args.n_repeat, omit_index=args.delete_index,
+                                n_repeat=loaded_args.n_repeat, omit_index=args.update_index,
                                 save_dir=save_dir, caption='post')
 
     wandb.log({"Prev Image": recall_img_1, "Post Image": recall_img_2,
                "Prev Stats": result_1, "Post Stats": result_2})
-    print("Prev Delete:")
+    print("Prev update:")
     print(json.dumps(result_1, sort_keys=True, indent=4))
-    print("Post Delete:")
+    print("Post update:")
     print(json.dumps(result_2, sort_keys=True, indent=4))
     recall_img_1.image.show()
     recall_img_2.image.show()
