@@ -121,6 +121,8 @@ class PCNetEnsemble:
             infer_info[f"repeat_{n}"] = {'hidden': hidden_info, 'obs': obs_info}
 
         X_pred = a_group.get_acts(layer_index=0, detach=True).to(original_device)
+        a_norms = [a_group.get_acts(layer_index=i).norm(p=1).item() for i in range(self._n_layers)]
+        infer_info["act_norms"] = a_norms
         return Prediction(data=X_pred, a_group=a_group, info=infer_info)
 
     def initialize_activation_group(self, X_obs: torch.Tensor) -> ActivationGroup:
@@ -148,8 +150,10 @@ class PCNetEnsemble:
         self._log_weights = update_result.log_weights
         return update_result
 
-    def log_joint(self, a_group: ActivationGroup) -> torch.Tensor:
-        ljs = torch.stack([pcnet.log_joint(a_group=a_group) for pcnet in self._pcnets], dim=1)
+    def log_joint(self, a_group: ActivationGroup,
+                  log_prob_strat: LayerLogProbStrat = None) -> torch.Tensor:
+        ljs = torch.stack([pcnet.log_joint(a_group=a_group, log_prob_strat=log_prob_strat)
+                           for pcnet in self._pcnets], dim=1)
         weighted_ljs = ljs + self._log_weights.unsqueeze(0)
         return torch.logsumexp(weighted_ljs, dim=-1)
 

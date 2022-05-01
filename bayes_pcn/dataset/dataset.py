@@ -1,3 +1,5 @@
+import numpy as np
+import os
 from PIL import Image
 import torch
 import torch.distributions as dists
@@ -5,6 +7,9 @@ from torch.utils.data import DataLoader
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 from typing import Dict, Tuple, Any, Optional, Callable
+
+
+from .tin import TinyImageNetDataset
 
 
 class PureNoise:
@@ -66,7 +71,8 @@ class CIFAR10Recall(datasets.CIFAR10):
     def __init__(self, root: str, train: bool = True, noise_transform: Optional[Callable] = None,
                  transform: Optional[Callable] = None, transform_post: Optional[Callable] = None,
                  target_transform: Optional[Callable] = None, download: bool = False) -> None:
-        super().__init__(root, train, transform, target_transform, download)
+        super().__init__(os.path.join(root, 'cifar10'), train, transform,
+                         target_transform, download)
         self.noise_transform = noise_transform
         self.transform_post = transform_post
 
@@ -78,6 +84,40 @@ class CIFAR10Recall(datasets.CIFAR10):
         img = Image.fromarray(img)
         if self.transform is not None:
             img = self.transform(img)
+
+        if self.noise_transform is not None:
+            img, fixed_indices = self.noise_transform(img)
+        else:
+            fixed_indices = torch.zeros(img.shape)
+
+        if self.transform_post is not None:
+            img = self.transform_post(img)
+
+        return img, fixed_indices
+
+
+class TinyImageNetRecall(TinyImageNetDataset):
+    """Wrapper around TinyImagenet dataset that, instead of returning target image class, returns
+    image indices to hold fixed during recall if applicable. These indices can be pixels that
+    we know to be unnoised.
+    """
+    def __init__(self, root: str, train: bool = True, noise_transform: Optional[Callable] = None,
+                 transform: Optional[Callable] = None, transform_post: Optional[Callable] = None,
+                 download: bool = False, max_samples: int = None) -> None:
+        super().__init__(root_dir=root, mode='train' if train else 'test',
+                         download=download, max_samples=max_samples)
+        self.transform_pre = transform
+        self.noise_transform = noise_transform
+        self.transform_post = transform_post
+
+    def __getitem__(self, index: int) -> Tuple[Any, Any]:
+        img = super(TinyImageNetRecall, self).__getitem__(index)['image'].astype(np.uint8)
+
+        # doing this so that it is consistent with all other datasets
+        # to return a PIL Image
+        img = Image.fromarray(img)
+        if self.transform_pre is not None:
+            img = self.transform_pre(img)
 
         if self.noise_transform is not None:
             img, fixed_indices = self.noise_transform(img)
@@ -136,17 +176,17 @@ def get_transforms(config: str):
 
 
 def get_dataset(dataset_cls, transform, transform_post, noise_transforms,
-                data_size, learn_batch_size, score_batch_size):
+                data_size, learn_batch_size, score_batch_size, **kwargs):
     # Initialize train and test dataloaders
     train = dataset_cls(root='./data', train=True, download=True,
-                        transform=transform, transform_post=transform_post)
+                        transform=transform, transform_post=transform_post, **kwargs)
     train = torch.utils.data.Subset(train, range(data_size))
     tests = []
     learn_loaders = dict(train=DataLoader(train, batch_size=learn_batch_size, shuffle=False))
     score_loaders = dict(train=DataLoader(train, batch_size=score_batch_size, shuffle=False))
     for name, noise_transform in noise_transforms.items():
         test = dataset_cls(root='./data', train=True, noise_transform=noise_transform,
-                           transform=transform, transform_post=transform_post, download=False)
+                           transform=transform, transform_post=transform_post, **kwargs)
         test = torch.utils.data.Subset(test, range(data_size))
         tests.append(test)
         learn_loaders[f"test_{name}"] = DataLoader(test, batch_size=learn_batch_size, shuffle=False)
@@ -157,6 +197,15 @@ def get_dataset(dataset_cls, transform, transform_post, noise_transforms,
 def cifar10(**kwargs) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader], Dict[str, Any]]:
     x_dim = 3 * 32 * 32
     learn_loaders, score_loaders, train, tests = get_dataset(dataset_cls=CIFAR10Recall, **kwargs)
+    classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+    info = {'classes': classes, 'train': train, 'test': tests, 'x_dim': x_dim}
+    return learn_loaders, score_loaders, info
+
+
+def tinyimagenet(**kwargs) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader], Dict[str, Any]]:
+    x_dim = 3 * 64 * 64
+    learn_loaders, score_loaders, train, tests = get_dataset(dataset_cls=TinyImageNetRecall,
+                                                             **kwargs)
     classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
     info = {'classes': classes, 'train': train, 'test': tests, 'x_dim': x_dim}
     return learn_loaders, score_loaders, info
@@ -177,5 +226,8 @@ def dataset_dispatcher(args):
                         learn_batch_size=learn_batch_size, score_batch_size=score_batch_size)
     if args.dataset == 'cifar10':
         return cifar10(**dataset_args)
+    elif args.dataset == 'tinyimagenet':
+        dataset_args['max_samples'] = data_size
+        return tinyimagenet(**dataset_args)
     else:
         raise NotImplementedError()

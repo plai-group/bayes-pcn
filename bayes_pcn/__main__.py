@@ -53,13 +53,14 @@ def get_parser() -> argparse.ArgumentParser:
                         choices=list(EnsembleProposalStrat))
 
     # data configs
-    parser.add_argument('--dataset', type=str, choices=['cifar10'], default='cifar10')
+    parser.add_argument('--dataset', type=str, choices=['cifar10', 'tinyimagenet'],
+                        default='cifar10')
     parser.add_argument('--dataset-mode', type=str, default='fast',
                         choices=['fast', 'mix', 'white', 'drop', 'mask', 'all'],
                         help='Specifies test dataset configuration.')
     parser.add_argument('--n-data', type=int, default=4)
     parser.add_argument('--n-batch', type=int, default=1)
-    parser.add_argument('--n-batch-score', type=int, default=32)
+    parser.add_argument('--n-batch-score', type=int, default=128)
 
     # training configs
     parser.add_argument('--n-epoch', type=int, default=1)
@@ -74,7 +75,7 @@ def get_parser() -> argparse.ArgumentParser:
 
     # eval configs
     parser.add_argument('--recall-threshold', type=float, default=0.005)
-    parser.add_argument('--log-every', type=int, default=1, help="Log every this # iterations")
+    parser.add_argument('--log-every', type=int, default=None, help="Log every this # iterations")
     parser.add_argument('--save-every', type=int, default=None, help="Save every this # iterations")
     return parser
 

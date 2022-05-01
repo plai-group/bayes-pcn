@@ -30,6 +30,7 @@ def get_parser() -> argparse.ArgumentParser:
                         choices=['fast', 'mix', 'white', 'drop', 'mask', 'all'],
                         help='Specifies test dataset configuration.')
     parser.add_argument('--n-data', type=int, default=None)
+    parser.add_argument('--n-batch', type=int, default=None)
     parser.add_argument('--n-repeat', type=int, default=1)
     parser.add_argument('--acc-thresh', type=float, default=0.005)
     parser.add_argument('--cuda', action='store_true', help='Use GPU if available.')
@@ -70,8 +71,8 @@ def score_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
     wandb.log(wandb_dict)
 
     del wandb_dict["Generated Image"]
-    wandb_dict = {k.split('/')[-1]: v for k, v in wandb_dict.items()}
-    wandb_dict["z_step"] = [wandb_dict["z_step"]]  # Need this to save with pandas
+    del wandb_dict["epoch/z_step"]
+    wandb_dict = {k.split('/')[-1]: [v] for k, v in wandb_dict.items()}
     return wandb_dict
 
 
@@ -93,6 +94,8 @@ if __name__ == "__main__":
     if args.n_data is not None:
         loaded_args.n_data = args.n_data
         loaded_args.n_batch = min(loaded_args.n_batch, args.n_data)
+    if args.n_batch is not None:
+        loaded_args.n_batch = args.n_batch
     if loaded_args.cuda and torch.cuda.device_count() > 0:
         model.device = torch.device('cuda')
 
@@ -101,15 +104,16 @@ if __name__ == "__main__":
     wandb.define_metric("iteration/*", step_metric="iteration/z_step")
     wandb.define_metric("epoch/z_step")
     wandb.define_metric("epoch/*", step_metric="epoch/z_step")
+    wandb.run.name = loaded_args.run_name
     setup(args=loaded_args)
     learn_loaders, score_loaders, dataset_info = dataset_dispatcher(args=loaded_args)
-    loaders = score_loaders if args.fast_mode else learn_loaders
+    loaders = score_loaders  # if args.fast_mode else learn_loaders
     train_loader, test_loaders = separate_train_test(loaders=loaders)
 
     result_dict = score_epoch(train_loader=train_loader, test_loaders=test_loaders,
                               epoch=1, model=model, acc_thresh=loaded_args.acc_thresh,
                               n_repeat=loaded_args.n_repeat, fast_mode=args.fast_mode,
                               save_dir=save_dir)
-    result_dict["name"] = os.path.dirname(args.model_path).split('/')[-1]
-    save_result(result=result_dict, path=f"{save_dir}/score.csv")
+    save_dict = {**loaded_args, **result_dict}
+    save_result(result=save_dict, path=f"{save_dir}/score.csv", overwrite=True)
     wandb.finish()

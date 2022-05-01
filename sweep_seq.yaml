@@ -3,29 +3,29 @@ program: -mbayes_pcn
 method: grid
 parameters:
   h-dim:
-    values: [256, 512, 1024, 2048]
+    values: [256, 512, 1024]
   act-fn:
     values: ["relu", "gelu", "selu"]
   n-models:
     values: [1, 4]
   n-layers:
     values: [2, 4]
-  activation-lr:
-    values: [0.01, 0.005]
+  layer-log-prob-strat:
+    values: ["map", "p_pred"]
+  sigma-prior:
+    values: [1., 0.1]
   seed:
     value: 0
   run-group:
-    value: "sweep-seq-2"
+    value: "sweep-seq-mode"
   wandb-mode:
     value: "online"
-  sigma-prior:
-    value: 0.1
+  activation-lr:
+    value: 0.05
   sigma-obs:
     value: 0.01
   sigma-data:
     value: 0.01
-  layer-log-prob-strat:
-    value: "p_pred"
   layer-sample-strat:
     value: "p_pred"
   layer-update-strat:
@@ -45,6 +45,4 @@ parameters:
   n-epoch:
     value: 1
   T-infer:
-    value: 1000
-  log-every:
-    value: 32
+    value: 500

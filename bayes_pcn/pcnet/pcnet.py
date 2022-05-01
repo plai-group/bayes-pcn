@@ -41,7 +41,8 @@ class PCNet:
                 traces.append(result)
         return result, ActivationGroup(activations=traces[::-1], no_param=True)
 
-    def log_joint(self, a_group: ActivationGroup) -> torch.Tensor:
+    def log_joint(self, a_group: ActivationGroup,
+                  log_prob_strat: LayerLogProbStrat = None) -> torch.Tensor:
         """Return log joint of network layer activations.
 
         Args:
@@ -50,11 +51,14 @@ class PCNet:
         Returns:
             torch.Tensor: Log probability vector of shape <d_batch>.
         """
-        result = torch.zeros(a_group.d_batch).to(self.device)
+        result = 0.  # torch.zeros(a_group.d_batch).to(self.device)
         for i, layer in enumerate(self.layers):
             upper_activation = a_group.get_acts(layer_index=i+1, detach=False)
             lower_activation = a_group.get_acts(layer_index=i, detach=False)
-            result = result + layer.log_prob(X_obs=lower_activation, X_in=upper_activation)
+            log_prob_args = dict(X_obs=lower_activation, X_in=upper_activation)
+            if log_prob_strat is not None:
+                log_prob_args['log_prob_strat'] = log_prob_strat
+            result = result + layer.log_prob(**log_prob_args)
         return result
 
     def update_weights(self, a_group: ActivationGroup, **kwargs) -> None:

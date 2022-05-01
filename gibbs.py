@@ -44,6 +44,8 @@ def sample_activations_posterior_data(args) -> List[List[torch.Tensor]]:
         nuts_kernel,
         num_samples=T_mh//10 + 1,
         warmup_steps=9 * (T_mh//10),
+        # num_samples=1,
+        # warmup_steps=T_mh,
         disable_progbar=False
     )
     mcmc.run(a_group.d_batch, a_group)
@@ -300,6 +302,8 @@ def main_gibbs():
     if args.run_name is None:
         name = f"t{args.T_mh}l{args.n_layers}s{args.sigma_prior}{args.act_fn}_{wandb.run.id}"
         args.run_name = name
+    if args.log_every is None:
+        args.log_every = 32
     wandb.run.name = args.run_name
     args.path = f'runs/{args.run_group}/{args.run_name}'
     print(f"Saving models to directory: {args.path}")

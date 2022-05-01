@@ -122,7 +122,11 @@ class PCLayer(AbstractPCLayer):
         self._device = torch.device('cpu')
         self._act_fn = act_fn
         self._weight_lr = kwargs.get('weight_lr', None)
-        self._scale = kwargs.get('scale_layer', False)
+        # self._scale = kwargs.get('scale_layer', False)
+        if kwargs.get('scale_layer', False):
+            self._layer_norm = torch.nn.LayerNorm(self._d_in, elementwise_affine=False)
+        else:
+            self._layer_norm = None
 
         # MatrixNormal prior mean matrix
         self._R = torch.empty(d_in, d_out)
@@ -145,13 +149,25 @@ class PCLayer(AbstractPCLayer):
         Returns:
             torch.Tensor: Log probability vector of shape <d_batch>.
         """
+        d_batch = X_obs.shape[0]
         Z_in = self._f(X_in)
         marginal_mean = self.predict(X_in=X_in)  # d_batch x d_out
         log_prob_strat = kwargs.get('log_prob_strat', self._log_prob_strat)
         if log_prob_strat == LayerLogProbStrat.MAP:
             marginal_Sigma = self._Sigma
         elif log_prob_strat == LayerLogProbStrat.P_PRED:
-            marginal_Sigma = (self._Sigma + Z_in.matmul(self._U).matmul(Z_in.T).diag()).unsqueeze(1)
+            # if d_batch > 1:
+            #     # This is the proper thing to do when d_batch > 1: Batches are not independent
+            #     # in general, although it is at the top layer
+            #     marginal_Sigma = self._Sigma * torch.eye(d_batch).to(self.device)\
+            #                     + Z_in.matmul(self._U).matmul(Z_in.T)
+            #     # dist = dists.MultivariateNormal(marginal_mean.T, marginal_Sigma)
+            #     # return dist.log_prob(X_obs.T).sum().unsqueeze(0)
+            #     error_mean = torch.zeros(d_batch).to(self.device)
+            #     dist = dists.MultivariateNormal(error_mean, marginal_Sigma)
+            #     return dist.log_prob(X_obs.T - marginal_mean.T).sum().unsqueeze(0)
+            # marginal_Sigma = self._Sigma + Z_in.matmul(self._U).matmul(Z_in.T).squeeze()
+            marginal_Sigma = self._Sigma + Z_in.matmul(self._U).matmul(Z_in.T).diag().unsqueeze(-1)
         else:
             raise NotImplementedError()
         dist = dists.Normal(marginal_mean, marginal_Sigma ** 0.5)
@@ -199,8 +215,11 @@ class PCLayer(AbstractPCLayer):
             result = F.softmax(X_in, dim=-1)
         else:
             raise NotImplementedError()
-        scaling = 1/(X_in.shape[-1] ** 0.5) if self._scale else 1
-        return result * scaling
+        # scaling = 1/(X_in.shape[-1] ** 0.5) if self._scale else 1
+        # return result * scaling
+        if self._layer_norm is not None:
+            result = self._layer_norm(result)
+        return result
 
     def _ml_update(self, X_obs: torch.Tensor, X_in: torch.Tensor, **kwargs) -> None:
         """Take a gradient step for the network parameters self._R. The gradient is
@@ -319,6 +338,11 @@ class PCTopLayer(AbstractPCLayer):
             marginal_Sigma = self._Sigma
         elif log_prob_strat == LayerLogProbStrat.P_PRED:
             marginal_Sigma = self._Sigma + self._U[0, 0]
+            # if d_batch > 1:
+            #     # This is the proper thing to do when d_batch > 1: Batches are not independent
+            #     # in general, although it is at the top layer
+            #     dist = dists.Normal(marginal_mean, marginal_Sigma ** 0.5)
+            #     return dist.log_prob(X_obs).sum().unsqueeze(0)
         else:
             raise NotImplementedError()
         dist = dists.Normal(marginal_mean, marginal_Sigma ** 0.5)

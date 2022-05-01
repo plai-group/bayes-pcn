@@ -192,6 +192,14 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
     Returns:
         PCNetEnsemble: _description_
     """
+    def should_log(index):
+        base_log_indices = [2**i for i in range(1, 16)]
+        return (log_every is not None and index % log_every == 0) or index in base_log_indices
+
+    def should_save(index):
+        base_save_indices = [2**i for i in range(1, 16)]
+        return (log_every is not None and index % log_every == 0) or index in base_save_indices
+
     train_loader = iter(train_loader)
     test_loaders = {name: iter(test_loader) for name, test_loader in test_loaders.items()}
 
@@ -199,13 +207,13 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         # Prepare train and test data batches for learning and evaluation
         curr_batch = get_next_data_batch(train_loader=train_loader, test_loaders=test_loaders)
         X_shape = curr_batch.original_shape
-        if i == 1:
-            first_batch = curr_batch
         wandb_dict = {"step": (epoch - 1) * len(train_loader) + i - (1 if epoch > 1 else 0)}
         init_img, unseen_img, curr_img, gen_img, update_img = None, None, None, None, None
+        if i == 1:
+            first_batch = curr_batch
 
-        # Evaluate model performance on the current data batch before update
-        if not fast_mode and (i % log_every) == 0:
+        if not fast_mode and should_log(index=i):
+            # Evaluate model performance on the current data batch before update
             result, pred_batch = score_data_batch(data_batch=curr_batch, model=model,
                                                   acc_thresh=acc_thresh, n_repeat=n_repeat,
                                                   prefix='unseen')
@@ -216,46 +224,50 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         X_train = curr_batch.train[0]
         update_result = model.learn(X_obs=X_train)
 
-        # Evaluate model performance on the first data batch
-        if not fast_mode and (i % log_every) == 0:
+        if not fast_mode and should_log(index=i):
+            # Evaluate model performance on the first data batch
             result, pred_batch = score_data_batch(data_batch=first_batch, model=model,
                                                   acc_thresh=acc_thresh, n_repeat=n_repeat,
                                                   prefix='initial')
             wandb_dict.update(result)
             init_img = plot_data_batch(data_batch=pred_batch)
 
-        # Evaluate model performance on the current data batches after update
-        if (i % log_every) == 0:
+        if should_log(index=i):
+            # Evaluate model performance on the current data batches after update
             result, pred_batch = score_data_batch(data_batch=curr_batch, model=model,
                                                   acc_thresh=acc_thresh, n_repeat=n_repeat,
                                                   prefix='current')
             wandb_dict.update(result)
             curr_img = plot_data_batch(data_batch=pred_batch)
-
-        # # TMP!!!
-        # res = model.delete(X_obs=X_train)
-        # del_result, pred_batch = score_data_batch(data_batch=curr_batch, model=model,
-        #                                           acc_thresh=acc_thresh, n_repeat=n_repeat,
-        #                                           prefix='delete')
-        # wandb_dict.update(del_result)
-        # del_img = plot_data_batch(data_batch=pred_batch)
-        # ret = model.learn(X_obs=X_train)
-        # ret_result, pred_batch = score_data_batch(data_batch=curr_batch, model=model,
-        #                                           acc_thresh=acc_thresh, n_repeat=n_repeat,
-        #                                           prefix='return')
-        # wandb_dict.update(ret_result)
-        # ret_img = plot_data_batch(data_batch=pred_batch)
-        # # TMP!!!
-
-        # Generate data samples and plot log loss trajectory
-        if (i % log_every) == 0:
+            # Generate data samples and plot log loss trajectory
             gen_img = generate_samples(model=model, X_shape=X_shape, d_batch=8,
                                        caption="Model samples via ancestral sampling.")
             update_img = plot_update_energy(update_result=update_result,
                                             caption="Activation update energy curve (avg/min/max).")
+            # Plot mean L1 norms of the first PCNet parameters
+            norm_info = dict()
+            for i_layer, layer in enumerate(model._pcnets[0].layers):
+                norm_info[f"layer{i_layer+1}_R_norm"] = layer._R.abs().mean().item()
+                norm_info[f"layer{i_layer+1}_U_norm"] = layer._U.abs().mean().item()
+                norm_info[f"layer{i_layer+1}_U_diag_norm"] = layer._U.diag().abs().mean().item()
+            wandb_dict.update(norm_info)
 
-        # Log to wandb
-        if (i % log_every) == 0:
+            # # TMP!!!
+            # res = model.delete(X_obs=X_train)
+            # del_result, pred_batch = score_data_batch(data_batch=curr_batch, model=model,
+            #                                           acc_thresh=acc_thresh, n_repeat=n_repeat,
+            #                                           prefix='delete')
+            # wandb_dict.update(del_result)
+            # del_img = plot_data_batch(data_batch=pred_batch)
+            # ret = model.learn(X_obs=X_train)
+            # ret_result, pred_batch = score_data_batch(data_batch=curr_batch, model=model,
+            #                                           acc_thresh=acc_thresh, n_repeat=n_repeat,
+            #                                           prefix='return')
+            # wandb_dict.update(ret_result)
+            # ret_img = plot_data_batch(data_batch=pred_batch)
+            # # TMP!!!
+
+            # Log to wandb
             wandb_dict = {f"iteration/{k}": v for k, v in wandb_dict.items()}
             wandb_dict["Current Image"] = curr_img
             wandb_dict["Generated Image"] = gen_img
@@ -267,7 +279,7 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
             # wandb_dict["Restored Image"] = ret_img
             wandb.log(wandb_dict)
 
-        if (save_every is not None and (i % save_every) == 0) or (i % 2) == 0:
+        if should_save(index=i):
             save_config((model, args), f"{args.path}/model_{epoch}_{i}.pt")
     return model
 

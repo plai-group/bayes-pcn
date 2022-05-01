@@ -81,8 +81,8 @@ def fig2img(fig, caption: str) -> wandb.Image:
     return img
 
 
-def save_result(result, path):
-    if os.path.exists(path):
+def save_result(result, path, overwrite=False):
+    if not overwrite and os.path.exists(path):
         prev_df = pd.read_csv(path)
         print("Will merge this previous result csv with the new result:")
         print(prev_df)
