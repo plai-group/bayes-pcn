@@ -76,7 +76,7 @@ def score_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
     return wandb_dict
 
 
-if __name__ == "__main__":
+def main():
     args = get_parser().parse_args()
     os.environ["WANDB_MODE"] = args.wandb_mode
     model, loaded_args = load_config(args.model_path)
@@ -116,4 +116,10 @@ if __name__ == "__main__":
                               save_dir=save_dir)
     save_dict = {**loaded_args, **result_dict}
     save_result(result=save_dict, path=f"{save_dir}/score.csv", overwrite=True)
-    wandb.finish()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    finally:
+        wandb.finish()

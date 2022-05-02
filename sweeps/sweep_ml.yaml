@@ -1,4 +1,4 @@
-project: "bayes-pcn-seq"
+project: "bayes-pcn-ml"
 program: -mbayes_pcn
 method: grid
 parameters:
@@ -6,43 +6,45 @@ parameters:
     values: [256, 512, 1024]
   act-fn:
     values: ["relu", "gelu", "selu"]
-  n-models:
-    values: [1, 4]
   n-layers:
     values: [2, 4]
-  layer-log-prob-strat:
-    values: ["map", "p_pred"]
   sigma-prior:
     values: [1., 0.1]
+  n-data:
+    values: [128, 256, 512, 1024]
+  n-epoch:
+    value: 1000
   seed:
     value: 0
+  layer-log-prob-strat:
+    value: "map"
   run-group:
-    value: "sweep-seq-mode"
+    value: "sweep-ml"
   wandb-mode:
-    value: "online"
+    value: "offline"
   activation-lr:
-    value: 0.05
+    value: 0.01
+  weight-lr:
+    value: 0.0001
   sigma-obs:
     value: 0.01
   sigma-data:
     value: 0.01
   layer-sample-strat:
-    value: "p_pred"
+    value: "map"
   layer-update-strat:
-    value: "bayes"
-  ensemble-proposal-strat:
-    value: "mode"
-  ensemble-log-joint-strat:
-    value: "individual"
+    value: "ml"
   dataset:
     value: "cifar10"
   dataset-mode:
     value: "all"
-  n-data:
-    value: 1024
   n-batch:
     value: 1
   n-epoch:
     value: 1
   T-infer:
     value: 500
+  n-models:
+    value: 1
+  log-every-epoch:
+    value: 25

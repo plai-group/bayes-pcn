@@ -287,8 +287,7 @@ class VLBFullUpdater(AbstractVLBUpdater):
             mean_vectors.append(mean_vector)
             fn = self._fixed_input_log_joint_fn(log_joint_fn=log_joint_fn, X_obs=X_obs[i:i+1],
                                                 original_dims=a_group.dims)
-            hessian = torch.autograd.functional.hessian(fn, mean_vector)
-            precision_matrix = - (hessian + 1e-8 * torch.eye(hessian.shape[0]).to(hessian.device))
+            precision_matrix = - torch.autograd.functional.hessian(fn, mean_vector)
             precision_matrices.append(precision_matrix.squeeze())
         mean_vectors = torch.cat(mean_vectors, dim=0)
         precision_matrices = torch.stack(precision_matrices, dim=0)

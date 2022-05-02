@@ -5,7 +5,7 @@ parameters:
   n-layers:
     values: [2, 4]
   n-data:
-    values: [4, 32, 64, 128]
+    values: [4, 32, 128]
   T-mh:
     values: [100, 250]
   act-fn:
@@ -15,9 +15,9 @@ parameters:
   mh-step-size:
     value: 0.
   run-group:
-    value: "sweep-gibbs-2"
+    value: "sweep-gibbs"
   wandb-mode:
-    value: "online"
+    value: "offline"
   sigma-obs:
     value: 0.01
   sigma-data:
@@ -40,14 +40,12 @@ parameters:
     value: "bayes"
   ensemble-log-joint-strat:
     value: "shared"
-  ensemble-proposal-strat:
-    value: "mode"
   dataset:
     value: "cifar10"
   dataset-mode:
     value: "mask"
   activation-lr:
-    value: 0.005
+    value: 0.01
   T-infer:
     value: 1000
   log-every:

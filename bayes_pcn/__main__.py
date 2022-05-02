@@ -59,12 +59,12 @@ def get_parser() -> argparse.ArgumentParser:
                         choices=['fast', 'mix', 'white', 'drop', 'mask', 'all'],
                         help='Specifies test dataset configuration.')
     parser.add_argument('--n-data', type=int, default=4)
-    parser.add_argument('--n-batch', type=int, default=1)
-    parser.add_argument('--n-batch-score', type=int, default=128)
+    parser.add_argument('--n-batch', type=int, default=None, help='None sets this to --n-data.')
+    parser.add_argument('--n-batch-score', type=int, default=None)
 
     # training configs
     parser.add_argument('--n-epoch', type=int, default=1)
-    parser.add_argument('--weight-lr', type=float, default=0.001)
+    parser.add_argument('--weight-lr', type=float, default=0.0001)
     parser.add_argument('--activation-lr', type=float, default=0.01)
     parser.add_argument('--activation-optim', choices=['adam', 'sgd'], default='adam')
     parser.add_argument('--T-infer', type=int, default=500)
@@ -75,8 +75,13 @@ def get_parser() -> argparse.ArgumentParser:
 
     # eval configs
     parser.add_argument('--recall-threshold', type=float, default=0.005)
-    parser.add_argument('--log-every', type=int, default=None, help="Log every this # iterations")
-    parser.add_argument('--save-every', type=int, default=None, help="Save every this # iterations")
+    parser.add_argument('--log-every', type=int, default=None,
+                        help="Log every this # iterations. None means log every 2^x iterations.")
+    parser.add_argument('--save-every', type=int, default=None,
+                        help="Save every this # iterations. None means save every 2^x iterations.")
+    parser.add_argument('--log-every-epoch', type=int, default=1,
+                        help="Log the entire dataset score and save the model every this # epochs. "
+                             "Used if n-epoch>1.")
     return parser
 
 
@@ -111,31 +116,32 @@ def run(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, DataLoade
         train_epoch(train_loader=learn_train_loader, test_loaders=learn_test_loaders, model=model,
                     epoch=e, n_repeat=args.n_repeat, log_every=args.log_every, fast_mode=fast_mode,
                     save_every=args.save_every, acc_thresh=acc_thresh, args=args)
-        result_dict = score_epoch(train_loader=score_train_loader, test_loaders=score_test_loaders,
-                                  epoch=e, model=model, acc_thresh=acc_thresh,
-                                  n_repeat=args.n_repeat)
-        save_config(config, f'{args.path}/latest.pt')
+        if e % args.log_every_epoch == 0:
+            result_dict = score_epoch(train_loader=score_train_loader,
+                                      test_loaders=score_test_loaders, epoch=e,
+                                      model=model, acc_thresh=acc_thresh, n_repeat=args.n_repeat)
+            save_config(config, f'{args.path}/latest.pt')
 
-        results_dict['epoch'].append(e)
-        for key, score in result_dict.items():
-            # Only care about average stats, not min and max
-            if not key.endswith("/avg"):
-                continue
-            key = key[:-4]
-            # Add score to history
-            if key not in results_dict:
-                results_dict[key] = []
-            results_dict[key].append(score)
-            # Save model if it achieves best score
-            best_score = best_scores_dict.get(key, float('inf'))
-            if "_mse" in key and score < best_score:
-                best_scores_dict[key] = score
-                name = key.replace("/", "_")
-                save_config(config, f"{args.path}/{name}.pt")
-            if "_acc" in key and score > best_score:
-                best_scores_dict[key] = score
-                name = key.replace("/", "_")
-                save_config(config, f"{args.path}/{name}.pt")
+            results_dict['epoch'].append(e)
+            for key, score in result_dict.items():
+                # Only care about average stats, not min and max
+                if not key.endswith("/avg"):
+                    continue
+                key = key[:-4]
+                # Add score to history
+                if key not in results_dict:
+                    results_dict[key] = []
+                results_dict[key].append(score)
+                # Save model if it achieves best score
+                best_score = best_scores_dict.get(key, float('inf'))
+                if "_mse" in key and score < best_score:
+                    best_scores_dict[key] = score
+                    name = key.replace("/", "_")
+                    save_config(config, f"{args.path}/{name}.pt")
+                if "_acc" in key and score > best_score:
+                    best_scores_dict[key] = score
+                    name = key.replace("/", "_")
+                    save_config(config, f"{args.path}/{name}.pt")
     return results_dict
 
 
@@ -188,8 +194,10 @@ def main():
 
     result = run(learn_loaders=learn_loaders, score_loaders=score_loaders, config=config)
     save_result(result=result, path=f"{args.path}/train.csv")
-    wandb.finish()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        wandb.finish()

@@ -199,7 +199,7 @@ def train_gibbs(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         # Evaluate model recall and log to wandb
         X_shape = data_batch.original_shape
         wandb_dict = {"step": epoch}
-        if (i % log_every) == 0:
+        if (epoch % log_every) == 0:
             a_group_ljs = [ur.info["model_0"]["mean_losses"][-1] for ur in update_results]
             wandb_dict["Log Joint"] = sum(a_group_ljs) + params_log_prob
             result, pred_batch = score_data_batch(data_batch=data_batch, model=model,
@@ -303,7 +303,7 @@ def main_gibbs():
         name = f"t{args.T_mh}l{args.n_layers}s{args.sigma_prior}{args.act_fn}_{wandb.run.id}"
         args.run_name = name
     if args.log_every is None:
-        args.log_every = 32
+        args.log_every = 1
     wandb.run.name = args.run_name
     args.path = f'runs/{args.run_group}/{args.run_name}'
     print(f"Saving models to directory: {args.path}")
@@ -326,8 +326,10 @@ def main_gibbs():
 
     result = run_gibbs(learn_loaders=learn_loaders, score_loaders=score_loaders, config=config)
     save_result(result=result, path=f"{args.path}/result.csv")
-    wandb.finish()
 
 
 if __name__ == "__main__":
-    main_gibbs()
+    try:
+        main_gibbs()
+    finally:
+        wandb.finish()

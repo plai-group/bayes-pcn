@@ -70,10 +70,8 @@ def safe_mvn(mean_vectors: torch.Tensor, precision_matrices: torch.Tensor
     except ValueError:
         safe_precision_matrices = []
         for precision_matrix in precision_matrices:
-            try:
-                torch.linalg.cholesky(precision_matrix)
-            except RuntimeError:
-                precision_matrix = precision_matrix.diag().max(torch.tensor(1.)).diag()
+            if not is_PD(A=precision_matrix):
+                precision_matrix = nearest_PD(A=precision_matrix)
             safe_precision_matrices.append(precision_matrix)
         safe_precision_matrices = torch.stack(safe_precision_matrices, dim=0)
         return dists.MultivariateNormal(loc=mean_vectors, precision_matrix=safe_precision_matrices)
@@ -199,10 +197,10 @@ def ess_resample(objs: List[Any], log_weights: torch.Tensor, ess_thresh: float,
 
 def is_PD(A: torch.Tensor):
     if A.numel() > 0:
-        try:
-            torch.linalg.cholesky(A)
-        except RuntimeError:
-            return False
+        # If I check only one of these conditions PyTorch can complain
+        pd_check = dists.constraints._PositiveDefinite().check(A)
+        cholesky_check = torch.linalg.cholesky_ex(A.flip(-2, -1)).info == 0
+        return pd_check and cholesky_check
     return True
 
 
@@ -229,7 +227,7 @@ def nearest_PD(A: torch.Tensor):
     A3 = (A2 + A2.T) / 2
 
     if is_PD(A3):
-        return A3
+        return A3.to(A.dtype)
 
     spacing = np.spacing(la.norm(A))
     eye = np.eye(A.shape[0])
@@ -239,7 +237,7 @@ def nearest_PD(A: torch.Tensor):
         A3 += eye * (-mineig * k**2 + spacing)
         k += 1
 
-    return A3
+    return A3.to(A.dtype)
 
 
 def fixed_indices_exists(fixed_indices: torch.Tensor) -> bool:

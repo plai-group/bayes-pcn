@@ -213,6 +213,8 @@ def tinyimagenet(**kwargs) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader]
 
 def dataset_dispatcher(args):
     data_size = args.n_data
+    args.n_batch = data_size if args.n_batch is None else args.n_batch
+    args.n_batch_score = data_size if args.n_batch_score is None else args.n_batch_score
     learn_batch_size = min(args.n_batch, data_size)
     score_batch_size = min(args.n_batch_score, data_size)
     assert (data_size % learn_batch_size) == 0 and (data_size % score_batch_size) == 0
