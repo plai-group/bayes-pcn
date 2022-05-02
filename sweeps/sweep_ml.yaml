@@ -38,8 +38,6 @@ parameters:
     value: "cifar10"
   dataset-mode:
     value: "all"
-  n-batch:
-    value: 1
   n-epoch:
     value: 1
   T-infer:

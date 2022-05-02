@@ -193,11 +193,11 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         PCNetEnsemble: _description_
     """
     def should_log(index):
-        base_log_indices = [2**i for i in range(1, 16)]
+        base_log_indices = [2**i for i in range(0, 16)]
         return (log_every is not None and index % log_every == 0) or index in base_log_indices
 
     def should_save(index):
-        base_save_indices = [2**i for i in range(1, 16)]
+        base_save_indices = [2**i for i in range(0, 16)]
         return (log_every is not None and index % log_every == 0) or index in base_save_indices
 
     train_loader = iter(train_loader)
