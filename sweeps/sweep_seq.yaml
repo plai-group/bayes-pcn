@@ -21,7 +21,7 @@ parameters:
   run-group:
     value: "sweep-seq-mode"
   wandb-mode:
-    value: "offline"
+    value: "online"
   activation-lr:
     value: 0.01
   sigma-obs:
