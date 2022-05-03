@@ -11,13 +11,13 @@ parameters:
   act-fn:
     values: ["gelu", "selu"]
   sigma-prior:
-    values: [0.1, 0.05]
+    values: [1., 0.1]
   mh-step-size:
     value: 0.
   run-group:
     value: "sweep-gibbs"
   wandb-mode:
-    value: "offline"
+    value: "online"
   sigma-obs:
     value: 0.01
   sigma-data:
@@ -47,6 +47,6 @@ parameters:
   activation-lr:
     value: 0.01
   T-infer:
-    value: 1000
+    value: 500
   log-every:
     value: 8
