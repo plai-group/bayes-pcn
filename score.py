@@ -104,7 +104,7 @@ def main():
     wandb.define_metric("iteration/*", step_metric="iteration/z_step")
     wandb.define_metric("epoch/z_step")
     wandb.define_metric("epoch/*", step_metric="epoch/z_step")
-    wandb.run.name = loaded_args.run_name
+    wandb.run.name = f"{loaded_args.run_name}_d{loaded_args.n_data}"
     setup(args=loaded_args)
     learn_loaders, score_loaders, dataset_info = dataset_dispatcher(args=loaded_args)
     loaders = score_loaders  # if args.fast_mode else learn_loaders
@@ -115,7 +115,7 @@ def main():
                               n_repeat=loaded_args.n_repeat, fast_mode=args.fast_mode,
                               save_dir=save_dir)
     save_dict = {**loaded_args, **result_dict}
-    save_result(result=save_dict, path=f"{save_dir}/score.csv", overwrite=True)
+    save_result(result=save_dict, path=f"{save_dir}/score.csv", overwrite=False)
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ def get_parser() -> argparse.ArgumentParser:
                         help='denotes which batch index to look at.')
     parser.add_argument('--n-repeat', type=int, default=1)
     parser.add_argument('--dataset-mode', type=str, default='fast',
-                        choices=['fast', 'mix', 'white', 'drop', 'mask'],
+                        choices=['fast', 'mix', 'white', 'drop', 'mask', 'all'],
                         help='Specifies test dataset configuration.')
     return parser
 
