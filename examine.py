@@ -2,7 +2,8 @@ import argparse
 import json
 
 from bayes_pcn.dataset import dataset_dispatcher, separate_train_test
-from bayes_pcn.trainer import get_next_data_batch, plot_data_batch, score_data_batch
+from bayes_pcn.trainer import get_next_data_batch, plot_data_batch,\
+                              score_data_batch, generate_samples
 from bayes_pcn.util import load_config
 
 
@@ -39,9 +40,11 @@ def compare_cifar(path, index, n_repeat, dataset_mode):
     result, pred_batch = score_data_batch(data_batch=data_batch, model=model,
                                           acc_thresh=0.005, n_repeat=n_repeat)
     result = {k: round(v, 5) for k, v in result.items()}
-    img = plot_data_batch(data_batch=pred_batch)
+    batch_img = plot_data_batch(data_batch=pred_batch)
     print(json.dumps(result, sort_keys=True, indent=4))
-    img.image.show()
+    batch_img.image.show()
+    gen_img = generate_samples(model=model, X_shape=data_batch.original_shape, d_batch=16)
+    gen_img.image.show()
 
 
 if __name__ == "__main__":

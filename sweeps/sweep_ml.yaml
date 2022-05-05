@@ -8,14 +8,18 @@ parameters:
     values: ["relu", "gelu", "selu"]
   n-layers:
     values: [2, 4]
-  sigma-prior:
-    values: [1., 0.1]
   n-data:
     values: [128, 256, 512, 1024]
   n-epoch:
     value: 1000
   seed:
     value: 0
+  sigma-prior:
+    value: 1.
+  sigma-obs:
+    value: 0.01
+  sigma-data:
+    value: 0.01
   layer-log-prob-strat:
     value: "map"
   run-group:
@@ -26,10 +30,6 @@ parameters:
     value: 0.01
   weight-lr:
     value: 0.0001
-  sigma-obs:
-    value: 0.01
-  sigma-data:
-    value: 0.01
   layer-sample-strat:
     value: "map"
   layer-update-strat:

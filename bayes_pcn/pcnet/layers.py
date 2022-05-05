@@ -385,8 +385,10 @@ class PCTopLayer(AbstractPCLayer):
             X_obs (torch.Tensor): Observed neuron values of shape <d_batch x d_out>.
             lr (float, optional): Learning rate for layer weights.
         """
+        d_batch = X_obs.shape[0]
+        grad = self._error(X_obs=X_obs).sum(dim=0) / self._Sigma
         weight_lr = kwargs.get('lr', self._weight_lr)
-        self._R = self._R + weight_lr * self._error(X_obs=X_obs).mean(dim=0)
+        self._R = self._R + weight_lr / d_batch * grad
 
     def _bayes_update(self, X_obs: torch.Tensor, **kwargs) -> None:
         """Bayesian normal normal conjugate update.
