@@ -176,18 +176,18 @@ def get_transforms(config: str):
 
 
 def get_dataset(dataset_cls, transform, transform_post, noise_transforms,
-                data_size, learn_batch_size, score_batch_size, **kwargs):
+                data_size, learn_batch_size, score_batch_size, data_start_index, **kwargs):
     # Initialize train and test dataloaders
     train = dataset_cls(root='./data', train=True, download=True,
                         transform=transform, transform_post=transform_post, **kwargs)
-    train = torch.utils.data.Subset(train, range(data_size))
+    train = torch.utils.data.Subset(train, range(data_start_index, data_size + data_start_index))
     tests = []
     learn_loaders = dict(train=DataLoader(train, batch_size=learn_batch_size, shuffle=False))
     score_loaders = dict(train=DataLoader(train, batch_size=score_batch_size, shuffle=False))
     for name, noise_transform in noise_transforms.items():
         test = dataset_cls(root='./data', train=True, noise_transform=noise_transform,
                            transform=transform, transform_post=transform_post, **kwargs)
-        test = torch.utils.data.Subset(test, range(data_size))
+        test = torch.utils.data.Subset(test, range(data_start_index, data_size + data_start_index))
         tests.append(test)
         learn_loaders[f"test_{name}"] = DataLoader(test, batch_size=learn_batch_size, shuffle=False)
         score_loaders[f"test_{name}"] = DataLoader(test, batch_size=score_batch_size, shuffle=False)
@@ -217,7 +217,9 @@ def dataset_dispatcher(args):
     args.n_batch_score = data_size if args.n_batch_score is None else args.n_batch_score
     learn_batch_size = min(args.n_batch, data_size)
     score_batch_size = min(args.n_batch_score, data_size)
+    data_start_index = args.data_start_index if 'data_start_index' in args else 0
     assert (data_size % learn_batch_size) == 0 and (data_size % score_batch_size) == 0
+    assert (data_start_index % learn_batch_size) == 0 and (data_start_index % score_batch_size) == 0
 
     # Image preprocessing logic
     dataset_mode = args.dataset_mode
@@ -225,7 +227,8 @@ def dataset_dispatcher(args):
 
     dataset_args = dict(transform=transform, transform_post=transform_post,
                         noise_transforms=noise_transforms, data_size=data_size,
-                        learn_batch_size=learn_batch_size, score_batch_size=score_batch_size)
+                        learn_batch_size=learn_batch_size, score_batch_size=score_batch_size,
+                        data_start_index=data_start_index)
     if args.dataset == 'cifar10':
         return cifar10(**dataset_args)
     elif args.dataset == 'tinyimagenet':

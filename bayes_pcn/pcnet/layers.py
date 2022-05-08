@@ -32,9 +32,9 @@ class AbstractPCLayer(ABC):
         if self._update_strat == LayerUpdateStrat.ML:
             self._ml_update(X_obs=X_obs, **kwargs)
         elif self._update_strat == LayerUpdateStrat.BAYES:
-            beta_forget = kwargs.pop('beta_forget', 0.)
-            if beta_forget > 0.:
-                self._bayes_forget(beta_forget=beta_forget)
+            # beta_forget = kwargs.pop('beta_forget', 0.)
+            # if beta_forget > 0.:
+            #    self.bayes_forget(beta_forget=beta_forget)
             self._bayes_update(X_obs=X_obs, **kwargs)
         else:
             raise NotImplementedError()
@@ -55,7 +55,7 @@ class AbstractPCLayer(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def _bayes_forget(self, beta_forget: float) -> None:
+    def bayes_forget(self, beta_forget: float) -> None:
         raise NotImplementedError()
 
     @property
@@ -281,7 +281,7 @@ class PCLayer(AbstractPCLayer):
         self._R = R_term_1.matmul(R_term_2)
         self._R, self._U = self._R.to(orig_dtype), self._U.to(orig_dtype)
 
-    def _bayes_forget(self, beta_forget: float) -> None:
+    def bayes_forget(self, beta_forget: float) -> None:
         self._R = (1-beta_forget)**0.5*self._R + (1-(1-beta_forget)**0.5)*self._R_original
         self._U = (1-beta_forget)*self._U + beta_forget*self._U_original
         # self._U = self._U + (beta_forget ** 2) * torch.eye(self._U.shape[0]).to(self.device)
@@ -424,7 +424,7 @@ class PCTopLayer(AbstractPCLayer):
             - self._U[0, 0]/self._Sigma * X_obs.mean(dim=0)
         self._R, self._U = self._R.to(orig_dtype), self._U.to(orig_dtype)
 
-    def _bayes_forget(self, beta_forget: float) -> None:
+    def bayes_forget(self, beta_forget: float) -> None:
         self._R = (1-beta_forget)**0.5*self._R + (1-(1-beta_forget)**0.5)*self._R_original
         self._U = (1-beta_forget)*self._U + beta_forget*self._U_original
         # self._U = self._U + (beta_forget ** 2) * torch.eye(self._U.shape[0]).to(self.device)

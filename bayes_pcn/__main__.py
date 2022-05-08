@@ -61,6 +61,8 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument('--n-data', type=int, default=4)
     parser.add_argument('--n-batch', type=int, default=None, help='None sets this to --n-data.')
     parser.add_argument('--n-batch-score', type=int, default=None)
+    parser.add_argument('--data-start-index', type=int, default=0,
+                        help='Which datapoint to start from.')
 
     # training configs
     parser.add_argument('--n-epoch', type=int, default=1)
@@ -72,6 +74,8 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument('--n-repeat', type=int, default=1,
                         help='how much ICM iteration to perform at inference.')
     parser.add_argument('--resample', action='store_true', help='resample if using n-models > 1.')
+    parser.add_argument('--forget-every', type=int, default=None,
+                        help="Apply forget with strength --beta-forget every this # of iterations.")
 
     # eval configs
     parser.add_argument('--recall-threshold', type=float, default=0.005)
@@ -105,7 +109,7 @@ def model_dispatcher(args: Dict[str, Any], dataset_info: Dict[str, Any]) -> PCNe
 def run(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, DataLoader],
         config: Tuple[PCNetEnsemble, Dict[str, Any]]) -> Dict[str, Any]:
     model, args = config
-    results_dict = {'name': args.run_name, 'seed': args.seed, 'epoch': []}
+    results_dict = {'name': args.run_name, 'seed': args.seed, 'epoch': [], 'n_data': args.n_data}
     best_scores_dict = {}
     acc_thresh = args.recall_threshold
     fast_mode = args.dataset_mode == 'fast'
@@ -115,7 +119,8 @@ def run(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, DataLoade
     for e in range(1, args.n_epoch+1):
         train_epoch(train_loader=learn_train_loader, test_loaders=learn_test_loaders, model=model,
                     epoch=e, n_repeat=args.n_repeat, log_every=args.log_every, fast_mode=fast_mode,
-                    save_every=args.save_every, acc_thresh=acc_thresh, args=args)
+                    save_every=args.save_every, acc_thresh=acc_thresh, args=args,
+                    forget_every=args.forget_every)
         if e % args.log_every_epoch == 0:
             result_dict = score_epoch(train_loader=score_train_loader,
                                       test_loaders=score_test_loaders, epoch=e,
@@ -143,26 +148,6 @@ def run(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, DataLoade
                     name = key.replace("/", "_")
                     save_config(config, f"{args.path}/{name}.pt")
     return results_dict
-
-
-"""
-AM via PCN Paper
-
-2 layer net: T (time) in {12, 16, 24, 32}
-Multi layer net: T in {32, 48, 72}
-
-Data size in {100, 250, 500, 750, 1000}
-hidden layer width in {256, 512, 1024, 2048}
-gamma (learning rate for activations) in {1, 0.5, 0.1, 0.05, 0.01}
-alpha (learning rate for weights) in {0.0001, 0.00005}
-
-Model Detail: PyTorch initialization + ReLU activations
-Corrupt Image Retrieval
-- Iteration function F 30 times, using T in {100, 250, 500}
-
-Weird Good Behaviour:
-- h: 256, data: 100, gamma: 0.00001, T: 10000
-"""
 
 
 def main():

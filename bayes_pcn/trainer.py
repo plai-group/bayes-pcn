@@ -173,8 +173,8 @@ def score(X_pred: torch.Tensor, X_truth: torch.Tensor, acc_thresh: float,
 
 def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], model: PCNetEnsemble,
                 epoch: int, n_repeat: int, log_every: int = 1, save_every: int = None,
-                acc_thresh: float = 0.005, fast_mode: bool = False, args: DotDict = None
-                ) -> PCNetEnsemble:
+                acc_thresh: float = 0.005, fast_mode: bool = False, args: DotDict = None,
+                forget_every: int = None) -> PCNetEnsemble:
     """Update model on all datapoint once. Assess model performance on unnoised and noised data.
 
     Args:
@@ -204,6 +204,9 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         else:
             return index % save_every == 0
 
+    def should_forget(index):
+        return forget_every is not None and index > 1 and (index - 1) % forget_every == 0
+
     train_loader = iter(train_loader)
     test_loaders = {name: iter(test_loader) for name, test_loader in test_loaders.items()}
 
@@ -215,6 +218,9 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         init_img, unseen_img, curr_img, gen_img, update_img = None, None, None, None, None
         if i == 1:
             first_batch = curr_batch
+
+        if should_forget(index=i):
+            model.forget()
 
         if not fast_mode and should_log(index=i):
             # Evaluate model performance on the current data batch before update

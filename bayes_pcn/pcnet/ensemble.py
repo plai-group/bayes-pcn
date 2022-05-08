@@ -27,6 +27,7 @@ class PCNetEnsemble:
         self._scale_layer: bool = scale_layer
         self._activation_optim: str = activation_optim
         self._log_weights: torch.Tensor = (torch.ones(self._n_models) / self._n_models).log()
+        self._beta_forget = kwargs.get('beta_forget')
         act_fn = ActFn.get_enum_from_value(act_fn)
 
         self._pcnets: List[PCNet] = self._initialize_base_models(n_models=n_models, act_fn=act_fn)
@@ -50,7 +51,6 @@ class PCNetEnsemble:
             update_fn_args['weight_lr'] = kwargs.get('weight_lr', None)
         if self.layer_update_strat == LayerUpdateStrat.BAYES:
             update_fn_args['resample'] = kwargs.get('resample', False)
-            update_fn_args['beta_forget'] = kwargs.get('beta_forget', 0.)
         if self.ensemble_log_joint_strat == EnsembleLogJointStrat.SHARED:
             update_fn_args['ensemble_log_joint'] = self.log_joint
 
@@ -88,6 +88,10 @@ class PCNetEnsemble:
                            fixed_indices=fixed_indices, activation_optim=self._activation_optim)
         for pcnet in self._pcnets:
             pcnet.delete_from_weights(a_group=a_group)
+
+    def forget(self, beta_forget: float = None) -> None:
+        for pcnet in self._pcnets:
+            pcnet.forget(beta_forget=self._beta_forget if beta_forget is None else beta_forget)
 
     def infer(self, X_obs: torch.Tensor, fixed_indices: torch.Tensor = None,
               n_repeat: int = 1) -> Prediction:

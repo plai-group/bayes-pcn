@@ -96,6 +96,7 @@ def main():
         loaded_args.n_batch = min(loaded_args.n_batch, args.n_data)
     if args.n_batch is not None:
         loaded_args.n_batch = args.n_batch
+        loaded_args.n_batch_score = args.n_batch
     if loaded_args.cuda and torch.cuda.device_count() > 0:
         model.device = torch.device('cuda')
 

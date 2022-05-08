@@ -84,6 +84,10 @@ class PCNet:
             lower_activation = a_group.get_acts(layer_index=i, detach=True)
             layer.delete(X_obs=lower_activation, X_in=upper_activation, **kwargs)
 
+    def forget(self, beta_forget: float):
+        for layer in self.layers:
+            layer.bayes_forget(beta_forget=beta_forget)
+
     def _init_layers(self, n_layers: int, x_dim: int, d_h: int, sigma_prior: float,
                      sigma_obs: float, sigma_data: float, act_fn: ActFn, scale_layer: bool,
                      **kwargs) -> List[AbstractPCLayer]:
