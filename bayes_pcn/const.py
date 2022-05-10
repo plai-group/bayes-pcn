@@ -34,6 +34,11 @@ class EnsembleLogJointStrat(ArgParseEnum):
     INDIVIDUAL = 'individual'  # Fit a proposal distribution per PCNet in the ensemble
 
 
+class MHNMetric(ArgParseEnum):
+    DOT = 'dot'
+    EUCLIDEAN = 'euclidean'
+
+
 class EnsembleProposalStrat(ArgParseEnum):
     MODE = 'mode'  # Proposal distribution always returns the mean
     FULL = 'full'  # Proposal distribution uses a full covariance matrix

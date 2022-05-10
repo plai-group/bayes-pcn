@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 from typing import Dict
 import wandb
 
+from bayes_pcn.const import LayerUpdateStrat
 from bayes_pcn.dataset import dataset_dispatcher, separate_train_test
 from bayes_pcn.pcnet import PCNetEnsemble
 from bayes_pcn.trainer import get_next_data_batch, plot_data_batch,\
@@ -91,6 +92,10 @@ def main():
     loaded_args.dataset_mode = args.dataset_mode
     loaded_args.n_repeat = args.n_repeat
     loaded_args.acc_thresh = args.acc_thresh
+    loaded_n_data = loaded_args.n_data
+    loaded_n_batch = loaded_args.n_batch
+    loaded_n_batch_score = loaded_args.n_batch_score
+
     if args.n_data is not None:
         loaded_args.n_data = args.n_data
         loaded_args.n_batch = min(loaded_args.n_batch, args.n_data)
@@ -99,6 +104,11 @@ def main():
         loaded_args.n_batch_score = args.n_batch
     if loaded_args.cuda and torch.cuda.device_count() > 0:
         model.device = torch.device('cuda')
+    # HACK: For ML runs, the only allowed data size is the one it was trained on
+    if loaded_args.layer_update_strat == LayerUpdateStrat.ML.value:
+        loaded_args.n_data = loaded_n_data
+        loaded_args.n_batch = loaded_n_batch
+        loaded_args.n_batch_score = loaded_n_batch_score
 
     wandb.init(project="bayes-pcn-score", entity="jasonyoo", config=loaded_args)
     wandb.define_metric("iteration/z_step")

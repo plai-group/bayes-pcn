@@ -110,7 +110,7 @@ class TinyImageNetPaths:
 
         # Get the test paths
         self.paths['test'] = list(map(lambda x: os.path.join(test_path, x),
-                                      os.listdir(test_path)))
+                                      sorted(os.listdir(test_path))))
         # Get the validation paths and labels
         with open(os.path.join(val_path, 'val_annotations.txt')) as valf:
             for line in valf:
@@ -121,7 +121,7 @@ class TinyImageNetPaths:
                 self.paths['val'].append((fname, label_id, nid, bbox))
 
         # Get the training paths
-        train_nids = os.listdir(train_path)
+        train_nids = sorted(os.listdir(train_path))
         for nid in train_nids:
             anno_path = os.path.join(train_path, nid, nid+'_boxes.txt')
             imgs_path = os.path.join(train_path, nid, 'images')
@@ -168,8 +168,9 @@ class TinyImageNetDataset(Dataset):
 
         if self.max_samples is not None:
             self.samples_num = min(self.max_samples, self.samples_num)
-            # self.samples = np.random.permutation(self.samples)[:self.samples_num]
-            self.samples = self.samples[:self.samples_num]
+            rng = np.random.default_rng(0)
+            self.samples = rng.permutation(self.samples)[:self.samples_num]
+            # self.samples = self.samples[:self.samples_num]
 
         if self.preload:
             self.img_data = np.zeros((self.samples_num,) + self.IMAGE_SHAPE,

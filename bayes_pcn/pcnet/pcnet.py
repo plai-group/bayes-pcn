@@ -10,11 +10,11 @@ from .util import *
 class PCNet:
     def __init__(self, n_layers: int, x_dim: int, h_dim: int, act_fn: ActFn,
                  sigma_prior: float, sigma_obs: float, sigma_data: float,
-                 scale_layer: bool) -> None:
+                 scale_layer: bool, **kwargs) -> None:
         self._layers = self._init_layers(n_layers=n_layers, x_dim=x_dim, d_h=h_dim,
                                          sigma_prior=sigma_prior, sigma_obs=sigma_obs,
                                          sigma_data=sigma_data, act_fn=act_fn,
-                                         scale_layer=scale_layer)
+                                         scale_layer=scale_layer, **kwargs)
         self.layer_log_prob_strat = None
         self.layer_sample_strat = None
         self.layer_update_strat = None

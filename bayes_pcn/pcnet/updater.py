@@ -3,7 +3,7 @@ from copy import deepcopy
 import torch
 from typing import Callable, List, Tuple
 
-from bayes_pcn.const import EnsembleProposalStrat, LayerLogProbStrat
+from bayes_pcn.const import EnsembleProposalStrat, LayerLogProbStrat, MHNMetric
 
 from .pcnet import PCNet
 from .util import *
@@ -69,8 +69,7 @@ class MLUpdater(AbstractUpdater):
 
 
 class MHNUpdater(AbstractUpdater):
-    def __init__(self, pcnet_template: PCNet, metric: str = 'euclidean'):
-        assert metric in ['dot', 'euclidean']
+    def __init__(self, pcnet_template: PCNet, metric: MHNMetric):
         self._pcnet_template = pcnet_template
         self._called = False
         self._metric = metric
@@ -98,9 +97,9 @@ class MHNUpdater(AbstractUpdater):
             new_pcnets.append(new_pcnet)
 
         # Set component importance appropriately (should be unnormalized for MHN)
-        if self._metric == 'euclidean':
+        if self._metric == MHNMetric.EUCLIDEAN:
             log_weights = torch.ones(len(new_pcnets)).to(X_obs.device)
-        elif self._metric == 'dot':
+        elif self._metric == MHNMetric.DOT:
             beta = new_pcnets[0].layers[0]._Sigma ** -0.5
             key_sq_norms = [beta*(pcnet.layers[0]._R.norm(p=2)**2).item() for pcnet in new_pcnets]
             log_weights = torch.tensor(key_sq_norms).to(X_obs.device)

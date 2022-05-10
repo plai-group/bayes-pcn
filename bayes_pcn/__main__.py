@@ -31,7 +31,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument('--n-layers', type=int, default=2)
     parser.add_argument('--h-dim', type=int, default=256)
     parser.add_argument('--sigma-prior', type=float, default=1.)
-    parser.add_argument('--sigma-obs', type=float, default=0.1)
+    parser.add_argument('--sigma-obs', type=float, default=0.01)
     parser.add_argument('--sigma-data', type=float, default=0.01)
     parser.add_argument('--beta-forget', type=float, default=0., help='between 0-1. 0 = no forget.')
     parser.add_argument('--scale-layer', action='store_true', help='normalize layer activations.')
@@ -51,6 +51,8 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument('--ensemble-proposal-strat', type=EnsembleProposalStrat,
                         default=EnsembleProposalStrat.MODE,
                         choices=list(EnsembleProposalStrat))
+    parser.add_argument('--mhn-metric', type=MHNMetric,
+                        default=MHNMetric.DOT, choices=list(MHNMetric))
 
     # data configs
     parser.add_argument('--dataset', type=str, choices=['cifar10', 'tinyimagenet'],
@@ -103,7 +105,8 @@ def model_dispatcher(args: Dict[str, Any], dataset_info: Dict[str, Any]) -> PCNe
                          ensemble_log_joint_strat=args.ensemble_log_joint_strat,
                          ensemble_proposal_strat=args.ensemble_proposal_strat,
                          scale_layer=args.scale_layer, resample=args.resample,
-                         weight_lr=args.weight_lr, beta_forget=args.beta_forget)
+                         weight_lr=args.weight_lr, beta_forget=args.beta_forget,
+                         mhn_metric=args.mhn_metric)
 
 
 def run(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, DataLoader],

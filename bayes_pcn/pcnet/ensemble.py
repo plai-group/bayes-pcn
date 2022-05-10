@@ -30,7 +30,12 @@ class PCNetEnsemble:
         self._beta_forget = kwargs.get('beta_forget')
         act_fn = ActFn.get_enum_from_value(act_fn)
 
-        self._pcnets: List[PCNet] = self._initialize_base_models(n_models=n_models, act_fn=act_fn)
+        base_models_init_args = dict(n_models=n_models, act_fn=act_fn)
+        if LayerUpdateStrat.get_enum_from_value(layer_update_strat) == LayerUpdateStrat.MHN:
+            # HACK: Makes MHN memory efficient
+            base_models_init_args['economy_mode'] = True
+        self._pcnets: List[PCNet] = self._initialize_base_models(**base_models_init_args)
+
         self.activation_init_strat = ActInitStrat.get_enum_from_value(activation_init_strat)
         self.layer_log_prob_strat = LayerLogProbStrat.get_enum_from_value(layer_log_prob_strat)
         self.layer_sample_strat = LayerSampleStrat.get_enum_from_value(layer_sample_strat)
@@ -46,17 +51,15 @@ class PCNetEnsemble:
                               infer_lr=infer_lr, infer_T=infer_T,
                               n_proposal_samples=n_proposal_samples,
                               activation_optim=activation_optim)
-        if self.layer_update_strat == LayerUpdateStrat.ML:
-            assert self.layer_log_prob_strat == LayerLogProbStrat.MAP
-            update_fn_args['weight_lr'] = kwargs.get('weight_lr', None)
-        if self.layer_update_strat == LayerUpdateStrat.BAYES:
-            update_fn_args['resample'] = kwargs.get('resample', False)
         if self.ensemble_log_joint_strat == EnsembleLogJointStrat.SHARED:
             update_fn_args['ensemble_log_joint'] = self.log_joint
 
         if self.layer_update_strat == LayerUpdateStrat.ML:
+            assert self.layer_log_prob_strat == LayerLogProbStrat.MAP
+            update_fn_args['weight_lr'] = kwargs.get('weight_lr', None)
             self._updater = MLUpdater(**update_fn_args)
         elif self.layer_update_strat == LayerUpdateStrat.BAYES:
+            update_fn_args['resample'] = kwargs.get('resample', False)
             if self.ensemble_proposal_strat == EnsembleProposalStrat.MODE:
                 self._updater = VLBModeUpdater(**update_fn_args)
             elif self.ensemble_proposal_strat == EnsembleProposalStrat.FULL:
@@ -64,7 +67,9 @@ class PCNetEnsemble:
             else:
                 raise NotImplementedError()
         elif self.layer_update_strat == LayerUpdateStrat.MHN:
-            self._updater = MHNUpdater(pcnet_template=deepcopy(self._pcnets[0]))
+            metric = MHNMetric.get_enum_from_value(kwargs.get('mhn_metric', MHNMetric.DOT.value))
+            update_fn_args = dict(pcnet_template=deepcopy(self._pcnets[0]), metric=metric)
+            self._updater = MHNUpdater(**update_fn_args)
         else:
             raise NotImplementedError()
 
@@ -193,10 +198,11 @@ class PCNetEnsemble:
         log_joint = self.log_joint(a_group=a_group)
         return Sample(data=data, log_joint=log_joint)
 
-    def _initialize_base_models(self, n_models: int, act_fn: ActFn) -> List[PCNet]:
+    def _initialize_base_models(self, n_models: int, act_fn: ActFn, **kwargs) -> List[PCNet]:
         return [PCNet(n_layers=self._n_layers, x_dim=self._x_dim, h_dim=self._h_dim,
                       sigma_prior=self._sigma_prior, sigma_obs=self._sigma_obs,
-                      sigma_data=self._sigma_data, act_fn=act_fn, scale_layer=self._scale_layer)
+                      sigma_data=self._sigma_data, act_fn=act_fn, scale_layer=self._scale_layer,
+                      **kwargs)
                 for _ in range(n_models)]
 
     @property

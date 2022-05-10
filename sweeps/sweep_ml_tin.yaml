@@ -23,7 +23,7 @@ parameters:
   layer-log-prob-strat:
     value: "map"
   run-group:
-    value: "sweep-ml-cifar-s0"
+    value: "sweep-ml-tin-s0"
   wandb-mode:
     value: "online"
   activation-lr:
@@ -35,7 +35,7 @@ parameters:
   layer-update-strat:
     value: "ml"
   dataset:
-    value: "cifar10"
+    value: "tinyimagenet"
   dataset-mode:
     value: "all"
   T-infer:

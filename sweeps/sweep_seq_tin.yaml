@@ -19,7 +19,7 @@ parameters:
   n-epoch:
     value: 1
   run-group:
-    value: "sweep-seq-cifar-s0"
+    value: "sweep-seq-tin-s0"
   wandb-mode:
     value: "online"
   activation-lr:
@@ -37,7 +37,7 @@ parameters:
   ensemble-log-joint-strat:
     value: "individual"
   dataset:
-    value: "cifar10"
+    value: "tinyimagenet"
   dataset-mode:
     value: "all"
   n-data:

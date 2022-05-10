@@ -315,6 +315,12 @@ class PCTopLayer(AbstractPCLayer):
         # Normal prior mean vector
         self._R = torch.empty(d_out)
         torch.nn.init.normal_(self._R, 0, d_out**-0.5)
+        if kwargs.get('economy_mode', False):
+            # HACK: Makes MHN memory efficient
+            self._U = torch.eye(1) * sigma_prior ** 2
+            self._Sigma = sigma_obs ** 2
+            return
+
         self._R_original = deepcopy(self._R)
         # Normal prior covariance matrix
         self._U = torch.eye(d_out) * sigma_prior ** 2

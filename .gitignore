@@ -1,7 +1,10 @@
 .vscode
 data
 env
+results
 runs
 test.py
+test_delete.py
+test_update.py
 **/__pycache__
 wandb
