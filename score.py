@@ -33,7 +33,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument('--n-data', type=int, default=None)
     parser.add_argument('--n-batch', type=int, default=None)
     parser.add_argument('--n-repeat', type=int, default=1)
-    parser.add_argument('--acc-thresh', type=float, default=0.005)
+    parser.add_argument('--acc-thresh', type=float, default=0.01)
     parser.add_argument('--cuda', action='store_true', help='Use GPU if available.')
     parser.add_argument('--fast-mode', action='store_true', help='Only log epoch stats.')
     parser.add_argument('--wandb-mode', type=str, choices=['online', 'offline'], default='online')
@@ -47,11 +47,13 @@ def score_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
     test_loaders = {name: iter(test_loader) for name, test_loader in test_loaders.items()}
 
     scores = []
+    individual_scores = []
     for i in range(1, len(train_loader)+1):
         batch = get_next_data_batch(train_loader=train_loader, test_loaders=test_loaders)
         X_shape = batch.original_shape
         result, pred_batch = score_data_batch(data_batch=batch, model=model,
                                               acc_thresh=acc_thresh, n_repeat=n_repeat)
+        individual_scores.append(pred_batch.info["all_mses"])
         if not fast_mode:
             recall_img = plot_data_batch(data_batch=pred_batch)
             wandb_dict = {"z_step": i, **result}
@@ -62,6 +64,10 @@ def score_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
 
     score_df = pd.DataFrame(scores)
     score_df.to_csv(f"{save_dir}/iteration_scores.csv", index=False)
+    tmp_df = pd.DataFrame(individual_scores)
+    individual_scores = {col: torch.cat(tmp_df[col].tolist(), dim=0) for col in tmp_df.columns}
+    individual_score_df = pd.DataFrame(individual_scores)
+    individual_score_df.to_csv(f"{save_dir}/iteration_individual_scores.csv", index=False)
     wandb_dict = {"z_step": epoch}
     for key, val in score_df.mean(axis=0).iteritems():
         wandb_dict[key] = val

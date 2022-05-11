@@ -51,28 +51,32 @@ def score_data_batch(data_batch: DataBatch, model: PCNetEnsemble, acc_thresh: fl
     """
     result = {}
     batch_info = {}
+    all_mses = {}
     X_truth = data_batch.train[0]
     prefix = f"/{prefix}" if prefix is not None else ""
 
     train_result = model.infer(X_obs=X_truth, n_repeat=n_repeat, fixed_indices=None)
-    mse_train, acc_train = score(X_pred=train_result.data, X_truth=X_truth,
-                                 acc_thresh=acc_thresh, fixed_indices=None)
+    mse_train, acc_train, mses_train = score(X_pred=train_result.data, X_truth=X_truth,
+                                             acc_thresh=acc_thresh, fixed_indices=None)
     result.update({f"train{prefix}_mse": mse_train, f"train{prefix}_acc": acc_train})
     batch_info["train"] = train_result.info
+    all_mses["train"] = mses_train
 
     tests_pred = {}
     for name, (X, fixed_indices) in data_batch.tests.items():
         test_result = model.infer(X_obs=X, n_repeat=n_repeat, fixed_indices=fixed_indices)
         batch_info[name] = test_result.info
-        mse_base, _ = score(X_pred=X, X_truth=X_truth,
-                            acc_thresh=acc_thresh, fixed_indices=fixed_indices)
-        mse_test, acc_test = score(X_pred=test_result.data, X_truth=X_truth,
-                                   acc_thresh=acc_thresh, fixed_indices=fixed_indices)
+        mse_base, _, _ = score(X_pred=X, X_truth=X_truth,
+                               acc_thresh=acc_thresh, fixed_indices=fixed_indices)
+        mse_test, acc_test, mses_test = score(X_pred=test_result.data, X_truth=X_truth,
+                                              acc_thresh=acc_thresh, fixed_indices=fixed_indices)
         result.update({f"{name}{prefix}_base": mse_base,
                        f"{name}{prefix}_mse": mse_test,
                        f"{name}{prefix}_acc": acc_test})
         tests_pred[name] = (test_result.data, fixed_indices)
+        all_mses[name] = mses_test
 
+    batch_info["all_mses"] = all_mses
     result_data_batch = DataBatch(train=data_batch.train, tests=data_batch.tests,
                                   train_pred=(train_result.data, None), tests_pred=tests_pred,
                                   original_shape=data_batch.original_shape, info=batch_info)
@@ -146,7 +150,7 @@ def generate_samples(model: PCNetEnsemble, X_shape: torch.Size, d_batch: int,
 
 
 def score(X_pred: torch.Tensor, X_truth: torch.Tensor, acc_thresh: float,
-          fixed_indices: torch.Tensor = None) -> Tuple[float, float]:
+          fixed_indices: torch.Tensor = None) -> Tuple[float, float, torch.Tensor]:
     """_summary_
 
     Args:
@@ -158,7 +162,8 @@ def score(X_pred: torch.Tensor, X_truth: torch.Tensor, acc_thresh: float,
             which data-specific indices to prevent modification when predicting.
 
     Returns:
-        Tuple[float, float]: Mean MSE and accuracy of the model's prediction on current batch.
+        Tuple[float, float, torch.Tensor]: Mean MSE and accuracy of the model's prediction on
+            the current batch + individual datapoint scores.
     """
     scaling = X_pred.shape[-1]
     if fixed_indices_exists(fixed_indices=fixed_indices):
@@ -168,7 +173,7 @@ def score(X_pred: torch.Tensor, X_truth: torch.Tensor, acc_thresh: float,
         scaling = scaling * fixed_indices.logical_not().sum(dim=-1) / fixed_indices.shape[-1]
     mse = ((X_truth - X_pred)**2).sum(dim=-1) / scaling
     acc = mse[mse < acc_thresh].shape[0] / mse.shape[0]
-    return mse.mean().item(), acc
+    return mse.mean().item(), acc, mse
 
 
 def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], model: PCNetEnsemble,
