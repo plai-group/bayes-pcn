@@ -11,7 +11,7 @@ parameters:
   n-models:
     values: [1, 4]
   seed:
-    value: 0
+    values: [1, 2]
   layer-log-prob-strat:
     value: "p_pred"
   sigma-prior:
@@ -19,7 +19,7 @@ parameters:
   n-epoch:
     value: 1
   run-group:
-    value: "sweep-seq-tin-s0"
+    value: "sweep-seq-tin-s12"
   wandb-mode:
     value: "online"
   activation-lr:

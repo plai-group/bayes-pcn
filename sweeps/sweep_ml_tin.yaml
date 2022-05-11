@@ -11,7 +11,7 @@ parameters:
   n-data:
     values: [128, 256, 512, 1024]
   seed:
-    value: 0
+    values: [1, 2]
   n-epoch:
     value: 2000
   sigma-prior:
@@ -23,7 +23,7 @@ parameters:
   layer-log-prob-strat:
     value: "map"
   run-group:
-    value: "sweep-ml-tin-s0"
+    value: "sweep-ml-tin-s12"
   wandb-mode:
     value: "online"
   activation-lr:
