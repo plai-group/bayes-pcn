@@ -1,8 +1,10 @@
 .vscode
 data
 env
+model_*
 results
 runs
+score_mhn.py
 test.py
 test_delete.py
 test_update.py

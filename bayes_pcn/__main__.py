@@ -128,8 +128,6 @@ def run(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, DataLoade
             result_dict = score_epoch(train_loader=score_train_loader,
                                       test_loaders=score_test_loaders, epoch=e,
                                       model=model, acc_thresh=acc_thresh, n_repeat=args.n_repeat)
-            save_config(config, f'{args.path}/latest.pt')
-
             results_dict['epoch'].append(e)
             for key, score in result_dict.items():
                 # Only care about average stats, not min and max
@@ -150,6 +148,7 @@ def run(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, DataLoade
                     best_scores_dict[key] = score
                     name = key.replace("/", "_")
                     save_config(config, f"{args.path}/{name}.pt")
+        save_config(config, f'{args.path}/latest.pt')
     return results_dict
 
 

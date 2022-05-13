@@ -155,7 +155,7 @@ def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
         min_losses.append(-log_joint.min().item())
         max_losses.append(-log_joint.max().item())
         early_stop = early_stop_infer(log_joint=log_joint, prev_log_joint=prev_log_joint)
-        prev_log_joint = log_joint
+        prev_log_joint = log_joint.detach()
         if early_stop:
             break
 

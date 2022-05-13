@@ -1,2 +1,2 @@
 from .ensemble import PCNetEnsemble
-from .util import DataBatch, UpdateResult
+from .util import DataBatch, Prediction, UpdateResult

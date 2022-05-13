@@ -5,14 +5,30 @@ import pandas as pd
 import pdb
 
 
-SWEEPS = ['run_name', 'h-dim', 'act-fn', 'n-layers',
-          'sigma-prior', 'n-models']
+SWEEPS = ['h-dim', 'act-fn', 'n-layers', 'n-models']
 
 
 def print_run(df: pd.DataFrame, run_name: str):
     row = df[df['run_name'] == run_name]
     info = {k: v for k, v in row.to_dict().items() if 'train' in k or 'test' in k}
     print(json.dumps(info, indent=4, sort_keys=True))
+
+
+def aggregate_seed(df_all: pd.DataFrame):
+    # Averages the scores across all seeds
+    stat_cols = [c for c in df_all.columns.tolist() if 'train' in c or 'test' in c]
+    param_cols = [c for c in df_all.columns.tolist()
+                  if c not in stat_cols and c not in
+                  ['run_name', 'seed', 'path', 'mhn_metric', 'data_start_index', 'forget_every',
+                   'run_group', 'run-group', 'acc_thresh']]
+    # param_cols = ['n_data', 'h-dim', 'act-fn', 'n-layers', 'n-models']
+    # print([c for c in param_cols if len(df_all[c].unique()) > 1])
+    grouped = df_all.groupby(param_cols, as_index=False)
+    df_all = grouped[stat_cols].mean()
+    # df_stdevs = grouped[stat_cols].std()
+    # for c in stat_cols:
+    #     df_all[f'{c}_std'] = df_stdevs[c]
+    return df_all
 
 
 def apply_filter(df_all: pd.DataFrame, filters: List[str]):
@@ -54,7 +70,7 @@ def compare_field_scores(df_all: pd.DataFrame, key: str, ascending: bool = True)
             result.append(result_val)
     result = pd.DataFrame(result)
     print(result)
-    pdb.set_trace()
+    # pdb.set_trace()
     return result
 
 
@@ -63,8 +79,8 @@ def assess_metric(df_all: pd.DataFrame, metric: str, ascending: bool = True):
     df = df_all[cols]
     metric = metric + ('_mse' if ascending else '_acc')
     result = df.sort_values(metric, ascending=ascending)
-    print(result)
-    pdb.set_trace()
+    print(result[:3])
+    # pdb.set_trace()
     return result
 
 
@@ -78,8 +94,9 @@ def main():
     parser.add_argument('--ascending', action='store_true', help='if true use mse, otherwise acc')
     args = parser.parse_args()
 
-    df_all = pd.read_csv(args.csv_path)
+    df_all = pd.read_csv(args.csv_path).fillna(0)
     df_all = apply_filter(df_all=df_all, filters=args.filters)
+    df_all = aggregate_seed(df_all=df_all)
     if args.key is not None:
         compare_field_scores(df_all=df_all, key=args.key, ascending=args.ascending)
     elif args.metric is not None:
