@@ -1,6 +1,7 @@
 .vscode
 data
 env
+figs
 model_*
 results
 runs

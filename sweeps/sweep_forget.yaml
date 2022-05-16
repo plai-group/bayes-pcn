@@ -3,7 +3,7 @@ program: -mbayes_pcn
 method: grid
 parameters:
   beta-forget:
-    values: [0., 0.005, 0.01, 0.02]
+    values: [0., 0.001, 0.002, 0.005, 0.01, 0.02]
   log-every:
     value: 64
   save-every:

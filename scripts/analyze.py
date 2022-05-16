@@ -79,7 +79,7 @@ def assess_metric(df_all: pd.DataFrame, metric: str, ascending: bool = True):
     df = df_all[cols]
     metric = metric + ('_mse' if ascending else '_acc')
     result = df.sort_values(metric, ascending=ascending)
-    print(result[:3])
+    print(result[:1])
     # pdb.set_trace()
     return result
 
@@ -102,7 +102,12 @@ def main():
     elif args.metric is not None:
         assess_metric(df_all=df_all, metric=args.metric, ascending=args.ascending)
     else:
-        raise Exception("One of --key and --metric must be specified.")
+        metrics = ['test_white0.2', 'test_drop0.25', 'test_mask0.25']
+        print(f"FILTERS: {args.filters}")
+        for metric in metrics:
+            print(f"===== Result for {metric} =====")
+            assess_metric(df_all=df_all, metric=metric, ascending=args.ascending)
+        # raise Exception("One of --key and --metric must be specified.")
 
 
 if __name__ == "__main__":
