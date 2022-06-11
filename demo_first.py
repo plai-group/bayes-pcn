@@ -5,6 +5,7 @@ import os
 import torch
 
 from bayes_pcn.dataset import dataset_dispatcher, separate_train_test
+from bayes_pcn.pcnet.util import DataBatch
 from bayes_pcn.trainer import get_next_data_batch, plot_data_batch,\
                               score_data_batch
 from bayes_pcn.util import load_config
@@ -51,6 +52,7 @@ def get_parser() -> argparse.ArgumentParser:
     return parser
 
 
+"""
 def visualize_index(path, index, n_repeat, dataset_mode, save_dir):
     os.makedirs(save_dir, exist_ok=True)
     model, args = load_config(path)
@@ -69,6 +71,58 @@ def visualize_index(path, index, n_repeat, dataset_mode, save_dir):
     batch_img = plot_data_batch(data_batch=pred_batch)
     print(json.dumps(result, sort_keys=True, indent=4))
     batch_img.image.save(os.path.join(save_dir, f"{index}.png"), "PNG")
+"""
+
+
+def extract_batch(pred_batch, data_index):
+    def extract_category(cat_tuple):
+        first = cat_tuple[0][data_index:data_index+1, :]
+        second = None if cat_tuple[1] is None else cat_tuple[1][data_index:data_index+1, :]
+        return (first, second)
+    train = extract_category(pred_batch.train)
+    tests = {key: extract_category(val) for key, val in pred_batch.tests.items()}
+    train_pred = extract_category(pred_batch.train_pred)
+    tests_pred = {key: extract_category(val) for key, val in pred_batch.tests_pred.items()}
+    new_batch = DataBatch(train=train, tests=tests, train_pred=train_pred, tests_pred=tests_pred,
+                          original_shape=pred_batch.original_shape)
+    return new_batch
+
+
+def get_test_merged_batch(data_batch, index):
+    # Create a DataBatch with the test images with different noises combined
+    data, fixed_indices = [], []
+    for i in range(0, index+1):
+        np.random.seed(i)
+        noise_name = np.random.choice([k for k in data_batch.tests.keys()])
+        curr_data, curr_fixed_indices = data_batch.tests[noise_name]
+        data.append(curr_data[i])
+        fixed_indices.append(curr_fixed_indices[i])
+    tests = dict(custom=(torch.stack(data, dim=0), torch.stack(fixed_indices, dim=0)))
+    return DataBatch(train=data_batch.train, tests=tests, train_pred=data_batch.train_pred,
+                     tests_pred=data_batch.tests_pred, original_shape=data_batch.original_shape)
+
+
+def visualize_index(path, index, n_repeat, dataset_mode, save_dir):
+    os.makedirs(save_dir, exist_ok=True)
+    model, args = load_config(path)
+    args.dataset_mode = dataset_mode
+    args.n_data, args.n_batch, args.n_batch_score = index+1, index+1, index+1
+    learn_loaders, _, _ = dataset_dispatcher(args)
+    train_loader, test_loaders = separate_train_test(learn_loaders)
+    train_loader, test_loaders = iter(train_loader), {k: iter(v) for k, v in test_loaders.items()}
+    # test_loader_name = np.random.choice([k for k in test_loaders.keys()])
+    # test_loaders = {test_loader_name: test_loaders[test_loader_name]}
+    data_batch = get_next_data_batch(train_loader=train_loader, test_loaders=test_loaders)
+    data_batch = get_test_merged_batch(data_batch, index)
+    result, pred_batch = score_data_batch(data_batch=data_batch, model=model,
+                                          acc_thresh=0.005, n_repeat=n_repeat)
+    result = {k: round(v, 5) for k, v in result.items()}
+    print(json.dumps(result, sort_keys=True, indent=4))
+    for i in range(args.n_batch):
+        os.makedirs(os.path.join(save_dir, f"{index}"), exist_ok=True)
+        curr_batch = extract_batch(pred_batch=pred_batch, data_index=i)
+        batch_img = plot_data_batch(data_batch=curr_batch)
+        batch_img.image.save(os.path.join(save_dir, f"{index}/{i}.png"), "PNG")
 
 
 if __name__ == "__main__":

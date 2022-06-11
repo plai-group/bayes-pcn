@@ -26,6 +26,14 @@ def add_text(img, text):
     return cv2.cvtColor(np.array(pil_im), cv2.COLOR_RGB2BGR)
 
 
+def to_video(img_array):
+    size = (img_array[0].shape[0], img_array[0].shape[1])
+    out = cv2.VideoWriter(f"demo_dir/{TYPE}.avi", cv2.VideoWriter_fourcc(*'DIVX'), 20, size)
+    for i in range(len(img_array)):
+        out.write(img_array[i])
+    out.release()
+
+
 img_array = []
 glob_result = glob.glob(f"demo_dir/{TYPE}/*.png")
 file_iter = sorted(glob_result, key=lambda p: int(os.path.basename(p).split('_')[-1][:-4]))
@@ -36,7 +44,4 @@ for i, filename in enumerate(file_iter):
     size = (width, height)
     img_array.append(img)
 
-out = cv2.VideoWriter(f"demo_dir/{TYPE}.avi", cv2.VideoWriter_fourcc(*'DIVX'), 20, size)
-for i in range(len(img_array)):
-    out.write(img_array[i])
-out.release()
+to_video(img_array)
