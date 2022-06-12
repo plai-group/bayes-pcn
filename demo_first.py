@@ -88,41 +88,107 @@ def extract_batch(pred_batch, data_index):
     return new_batch
 
 
+# def get_test_merged_batch(data_batch, index):
+#     # Create a DataBatch with the test images with different noises combined
+#     data, fixed_indices = [], []
+#     for i in range(0, index+1):
+#         np.random.seed(i)
+#         noise_name = np.random.choice([k for k in data_batch.tests.keys()])
+#         curr_data, curr_fixed_indices = data_batch.tests[noise_name]
+#         data.append(curr_data[i])
+#         fixed_indices.append(curr_fixed_indices[i])
+#     tests = dict(custom=(torch.stack(data, dim=0), torch.stack(fixed_indices, dim=0)))
+#     return DataBatch(train=data_batch.train, tests=tests, train_pred=data_batch.train_pred,
+#                      tests_pred=data_batch.tests_pred, original_shape=data_batch.original_shape)
+
+
+# def visualize_index(path, index, n_repeat, dataset_mode, save_dir):
+#     os.makedirs(save_dir, exist_ok=True)
+#     model, args = load_config(path)
+#     args.dataset_mode = dataset_mode
+#     args.n_data, args.n_batch, args.n_batch_score = index+1, index+1, index+1
+#     learn_loaders, _, _ = dataset_dispatcher(args)
+#     train_loader, test_loaders = separate_train_test(learn_loaders)
+#     train_loader, test_loaders = iter(train_loader), {k: iter(v) for k, v in test_loaders.items()}
+#     data_batch = get_next_data_batch(train_loader=train_loader, test_loaders=test_loaders)
+#     data_batch = get_test_merged_batch(data_batch, index)
+#     result, pred_batch = score_data_batch(data_batch=data_batch, model=model,
+#                                           acc_thresh=0.005, n_repeat=n_repeat)
+#     result = {k: round(v, 5) for k, v in result.items()}
+#     print(json.dumps(result, sort_keys=True, indent=4))
+#     for i in range(args.n_batch):
+#         os.makedirs(os.path.join(save_dir, f"{index}"), exist_ok=True)
+#         curr_batch = extract_batch(pred_batch=pred_batch, data_index=i)
+#         batch_img = plot_data_batch(data_batch=curr_batch)
+#         batch_img.image.save(os.path.join(save_dir, f"{index}/{i}.png"), "PNG")
+
+
 def get_test_merged_batch(data_batch, index):
     # Create a DataBatch with the test images with different noises combined
-    data, fixed_indices = [], []
+    auto_indices, hetero_indices = [], []
+    auto_train, hetero_train = [], []
+    auto_tests, hetero_tests = [], []
+    auto_fixed_indices, hetero_fixed_indices = [], []
+    train_pred, tests_pred = data_batch.train_pred, data_batch.tests_pred
+    original_shape = data_batch.original_shape
+
     for i in range(0, index+1):
         np.random.seed(i)
         noise_name = np.random.choice([k for k in data_batch.tests.keys()])
         curr_data, curr_fixed_indices = data_batch.tests[noise_name]
-        data.append(curr_data[i])
-        fixed_indices.append(curr_fixed_indices[i])
-    tests = dict(custom=(torch.stack(data, dim=0), torch.stack(fixed_indices, dim=0)))
-    return DataBatch(train=data_batch.train, tests=tests, train_pred=data_batch.train_pred,
-                     tests_pred=data_batch.tests_pred, original_shape=data_batch.original_shape)
+        if 'white' in noise_name:
+            auto_indices.append(i)
+            auto_train.append(data_batch.train[0][i])
+            auto_tests.append(curr_data[i])
+            auto_fixed_indices.append(curr_fixed_indices[i])
+        else:
+            hetero_indices.append(i)
+            hetero_train.append(data_batch.train[0][i])
+            hetero_tests.append(curr_data[i])
+            hetero_fixed_indices.append(curr_fixed_indices[i])
+    auto_train = (torch.stack(auto_train, dim=0) if len(auto_train) > 0 else None, None)
+    hetero_train = (torch.stack(hetero_train, dim=0) if len(hetero_train) > 0 else None, None)
+    auto_tests = dict(custom=(torch.stack(auto_tests, dim=0),
+                              torch.stack(auto_fixed_indices, dim=0))
+                      if len(auto_tests) > 0 else (None, None))
+    hetero_tests = dict(custom=(torch.stack(hetero_tests, dim=0),
+                                torch.stack(hetero_fixed_indices, dim=0))
+                        if len(hetero_tests) > 0 else (None, None))
+    auto_batch = DataBatch(train=auto_train, tests=auto_tests, train_pred=train_pred,
+                           tests_pred=tests_pred, original_shape=original_shape)
+    hetero_batch = DataBatch(train=hetero_train, tests=hetero_tests, train_pred=train_pred,
+                             tests_pred=tests_pred, original_shape=original_shape)
+    return (auto_batch, auto_indices, hetero_batch, hetero_indices)
 
 
 def visualize_index(path, index, n_repeat, dataset_mode, save_dir):
-    os.makedirs(save_dir, exist_ok=True)
+    os.makedirs(os.path.join(save_dir, f"{index}"), exist_ok=True)
     model, args = load_config(path)
     args.dataset_mode = dataset_mode
     args.n_data, args.n_batch, args.n_batch_score = index+1, index+1, index+1
     learn_loaders, _, _ = dataset_dispatcher(args)
     train_loader, test_loaders = separate_train_test(learn_loaders)
     train_loader, test_loaders = iter(train_loader), {k: iter(v) for k, v in test_loaders.items()}
-    # test_loader_name = np.random.choice([k for k in test_loaders.keys()])
-    # test_loaders = {test_loader_name: test_loaders[test_loader_name]}
     data_batch = get_next_data_batch(train_loader=train_loader, test_loaders=test_loaders)
-    data_batch = get_test_merged_batch(data_batch, index)
-    result, pred_batch = score_data_batch(data_batch=data_batch, model=model,
-                                          acc_thresh=0.005, n_repeat=n_repeat)
-    result = {k: round(v, 5) for k, v in result.items()}
-    print(json.dumps(result, sort_keys=True, indent=4))
-    for i in range(args.n_batch):
-        os.makedirs(os.path.join(save_dir, f"{index}"), exist_ok=True)
-        curr_batch = extract_batch(pred_batch=pred_batch, data_index=i)
-        batch_img = plot_data_batch(data_batch=curr_batch)
-        batch_img.image.save(os.path.join(save_dir, f"{index}/{i}.png"), "PNG")
+    auto_batch, a_indices, hetero_batch, h_indices = get_test_merged_batch(data_batch, index)
+    if len(a_indices) > 0:
+        auto_result, auto_pred_batch = score_data_batch(data_batch=auto_batch, model=model,
+                                                        acc_thresh=0.005, n_repeat=n_repeat)
+        auto_result = {k: round(v, 5) for k, v in auto_result.items()}
+        print(json.dumps(auto_result, sort_keys=True, indent=4))
+        for i, a_index in enumerate(a_indices):
+            curr_batch = extract_batch(pred_batch=auto_pred_batch, data_index=i)
+            batch_img = plot_data_batch(data_batch=curr_batch)
+            batch_img.image.save(os.path.join(save_dir, f"{index}/{a_index}.png"), "PNG")
+    if len(h_indices) > 0:
+        hetero_result, hetero_pred_batch = score_data_batch(data_batch=hetero_batch, model=model,
+                                                            acc_thresh=0.005, n_repeat=n_repeat)
+        hetero_result = {k: round(v, 5) for k, v in hetero_result.items()}
+        print(json.dumps(hetero_result, sort_keys=True, indent=4))
+        for i, h_index in enumerate(h_indices):
+            curr_batch = extract_batch(pred_batch=hetero_pred_batch, data_index=i)
+            batch_img = plot_data_batch(data_batch=curr_batch)
+            batch_img.image.save(os.path.join(save_dir, f"{index}/{h_index}.png"), "PNG")
 
 
 if __name__ == "__main__":

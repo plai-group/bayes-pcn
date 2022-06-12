@@ -107,6 +107,8 @@ def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
     this function can be used to only update hidden layer neurons, observation neurons,
     or both. Clamps all layers on method exit.
 
+    NOTE: Autoassociative and heteroassociative recall cannot occur in the same batch.
+
     Args:
         log_joint_fn (Callable[[ActivationGroup], torch.Tensor]): A function that accepts
             an ActivationGroup object and returns log probability vector of shape <d_batch>.
