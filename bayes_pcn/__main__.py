@@ -35,6 +35,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument('--sigma-data', type=float, default=0.01)
     parser.add_argument('--beta-forget', type=float, default=0., help='between 0-1. 0 = no forget.')
     parser.add_argument('--scale-layer', action='store_true', help='normalize layer activations.')
+    parser.add_argument('--bias', action='store_true', help='Use bias alongside linear transform.')
     parser.add_argument('--act-fn', type=ActFn,
                         default=ActFn.RELU, choices=list(ActFn))
     parser.add_argument('--activation-init-strat', type=ActInitStrat,
@@ -106,7 +107,7 @@ def model_dispatcher(args: Dict[str, Any], dataset_info: Dict[str, Any]) -> PCNe
                          ensemble_proposal_strat=args.ensemble_proposal_strat,
                          scale_layer=args.scale_layer, resample=args.resample,
                          weight_lr=args.weight_lr, beta_forget=args.beta_forget,
-                         mhn_metric=args.mhn_metric)
+                         mhn_metric=args.mhn_metric, bias=args.bias)
 
 
 def run(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, DataLoader],

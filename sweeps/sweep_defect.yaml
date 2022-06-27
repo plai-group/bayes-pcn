@@ -1,0 +1,50 @@
+project: "bayes-pcn-defect"
+program: -mbayes_pcn
+method: grid
+parameters:
+  act-fn:
+    values: ["relu", "gelu", "lwta_dense"]
+  sigma-prior:
+    values: [0.5, 1.]
+  sigma-obs:
+    values: [0.01, 0.05]
+  activation-lr:
+    values: [0.02, 0.01, 0.005]
+  T-infer:
+    values: [500, 1000, 2000]
+  h-dim:
+    value: 2048
+  n-layers:
+    value: 4
+  n-models:
+    value: 1
+  seed:
+    value: 0
+  layer-log-prob-strat:
+    value: "p_pred"
+  n-epoch:
+    value: 1
+  run-group:
+    value: "sweep-defect"
+  wandb-mode:
+    value: "online"
+  layer-sample-strat:
+    value: "map"
+  layer-update-strat:
+    value: "bayes"
+  ensemble-proposal-strat:
+    value: "mode"
+  ensemble-log-joint-strat:
+    value: "individual"
+  dataset:
+    value: "cifar10"
+  dataset-mode:
+    value: "all"
+  n-data:
+    value: 1024
+  n-batch:
+    value: 1
+  log-every:
+    value: 128
+  save-every:
+    value: 128

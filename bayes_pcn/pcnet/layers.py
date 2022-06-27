@@ -7,7 +7,7 @@ import pyro
 import pyro.distributions as pdists
 
 from bayes_pcn.const import *
-from bayes_pcn.pcnet.util import is_PD, nearest_PD
+from bayes_pcn.pcnet.util import is_PD, nearest_PD, local_wta
 
 
 class AbstractPCLayer(ABC):
@@ -122,19 +122,21 @@ class PCLayer(AbstractPCLayer):
         self._device = torch.device('cpu')
         self._act_fn = act_fn
         self._weight_lr = kwargs.get('weight_lr', None)
-        # self._scale = kwargs.get('scale_layer', False)
+        self._bias = kwargs.get('bias', None)
+        if self._bias:
+            self._d_in = self._d_in + 1
         if kwargs.get('scale_layer', False):
             self._layer_norm = torch.nn.LayerNorm(self._d_in, elementwise_affine=False)
         else:
             self._layer_norm = None
 
         # MatrixNormal prior mean matrix
-        self._R = torch.empty(d_in, d_out)
+        self._R = torch.empty(self._d_in, self._d_out)
         # torch.nn.init.kaiming_uniform_(self._R, a=5**0.5)
         torch.nn.init.kaiming_normal_(self._R, nonlinearity='linear')
         self._R_original = deepcopy(self._R)
         # MatrixNormal prior row-wise covariance matrix (initially isotropic)
-        self._U = torch.eye(d_in) * sigma_prior ** 2
+        self._U = torch.eye(self._d_in) * sigma_prior ** 2
         self._U_original = deepcopy(self._U)
         # Isotropic observation variance
         self._Sigma = sigma_obs ** 2
@@ -149,7 +151,6 @@ class PCLayer(AbstractPCLayer):
         Returns:
             torch.Tensor: Log probability vector of shape <d_batch>.
         """
-        d_batch = X_obs.shape[0]
         Z_in = self._f(X_in)
         marginal_mean = self.predict(X_in=X_in)  # d_batch x d_out
         log_prob_strat = kwargs.get('log_prob_strat', self._log_prob_strat)
@@ -213,12 +214,20 @@ class PCLayer(AbstractPCLayer):
             result = F.selu(X_in)
         elif self._act_fn == ActFn.SOFTMAX:
             result = F.softmax(X_in, dim=-1)
+        elif self._act_fn == ActFn.LWTA_SPARSE:
+            # Neuron groups of size layer dim / 16 inhibit each other
+            result = local_wta(X_in=X_in, block_size=X_in.shape[1]//16, hard=True)
+        elif self._act_fn == ActFn.LWTA_DENSE:
+            # Every neighbouring neurons inhibit each other
+            result = local_wta(X_in=X_in, block_size=2, hard=True)
         else:
             raise NotImplementedError()
-        # scaling = 1/(X_in.shape[-1] ** 0.5) if self._scale else 1
-        # return result * scaling
+
         if self._layer_norm is not None:
             result = self._layer_norm(result)
+        if self._bias:
+            # Affine transform: intuitively equivalent to having a neuron that's always on
+            result = torch.cat((result, torch.ones(X_in.shape[0], 1).to(X_in.device)), dim=-1)
         return result
 
     def _ml_update(self, X_obs: torch.Tensor, X_in: torch.Tensor, **kwargs) -> None:

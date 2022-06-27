@@ -56,6 +56,8 @@ class ActFn(ArgParseEnum):
     GELU = 'gelu'
     SELU = 'selu'
     SOFTMAX = 'softmax'
+    LWTA_SPARSE = 'lwta_sparse'
+    LWTA_DENSE = 'lwta_dense'
 
 
 class Dataset(ArgParseEnum):

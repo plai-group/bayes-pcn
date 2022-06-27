@@ -140,8 +140,8 @@ def plot_update_energy(update_result: UpdateResult, caption: str = None) -> wand
 
 
 def generate_samples(model: PCNetEnsemble, X_shape: torch.Size, d_batch: int,
-                     caption: str = None) -> wandb.Image:
-    sample_obj = model.sample(d_batch=d_batch)
+                     caption: str = None, X_top: torch.Tensor = None) -> wandb.Image:
+    sample_obj = model.sample(d_batch=d_batch, X_top=X_top)
     X_gen, log_joint = sample_obj.data, [round(lj, 3) for lj in sample_obj.log_joint.tolist()]
     img = torchvision.utils.make_grid(X_gen.reshape(-1, *X_shape[1:]), nrow=min(d_batch, 4))
     log_joint_msg = f"Sample Weights: {log_joint}"

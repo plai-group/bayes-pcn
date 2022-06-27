@@ -4,6 +4,7 @@ import numpy as np
 from numpy import linalg as la
 import torch
 import torch.distributions as dists
+import torch.nn.functional as F
 
 from typing import Any, Callable, Dict, List, NamedTuple, Tuple
 from .a_group import ActivationGroup
@@ -244,3 +245,13 @@ def nearest_PD(A: torch.Tensor):
 
 def fixed_indices_exists(fixed_indices: torch.Tensor) -> bool:
     return fixed_indices is not None and fixed_indices.max().item() == 1
+
+
+def local_wta(X_in: torch.Tensor, block_size: int, hard: bool = True) -> torch.Tensor:
+    d_batch, d_orig = X_in.shape
+    assert d_orig % block_size == 0
+    num_blocks = d_orig // block_size
+    X_in = X_in.reshape(d_batch, num_blocks, block_size)
+    wta_fn = torch.argmax if hard else F.softmax
+    mask_matrix = F.one_hot(wta_fn(X_in, dim=-1), num_classes=block_size)
+    return (X_in * mask_matrix).reshape(d_batch, d_orig)

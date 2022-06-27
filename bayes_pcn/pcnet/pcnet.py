@@ -35,6 +35,8 @@ class PCNet:
         with pyro.plate(f"plate", size=d_batch, dim=-2):
             for i, layer in enumerate(reversed(self.layers)):
                 sample_args = dict(d_batch=d_batch, X_in=result)
+                if i == 0:
+                    sample_args['X_obs'] = kwargs.get('X_top', None)
                 if i == len(self.layers) - 1:
                     sample_args['X_obs'] = kwargs.get('X_obs', None)
                 result = layer.sample(**sample_args)
@@ -92,16 +94,18 @@ class PCNet:
                      sigma_obs: float, sigma_data: float, act_fn: ActFn, scale_layer: bool,
                      **kwargs) -> List[AbstractPCLayer]:
         sigma_obs_l0 = sigma_obs if sigma_data is None else sigma_data
+        bias = kwargs.pop('bias')
         if n_layers == 1:
             return [PCTopLayer(d_out=x_dim, sigma_prior=sigma_prior,
                                sigma_obs=sigma_obs_l0, layer_index=0, **kwargs)]
 
         layers = [PCLayer(d_in=d_h, d_out=x_dim, act_fn=act_fn, sigma_prior=sigma_prior,
-                          sigma_obs=sigma_obs_l0, scale_layer=scale_layer, layer_index=0, **kwargs)]
+                          sigma_obs=sigma_obs_l0, scale_layer=scale_layer, layer_index=0,
+                          bias=bias, **kwargs)]
         for i in range(1, n_layers-1):
             layers.append(PCLayer(d_in=d_h, d_out=d_h, act_fn=act_fn, scale_layer=scale_layer,
                                   sigma_prior=sigma_prior, sigma_obs=sigma_obs, layer_index=i,
-                                  **kwargs))
+                                  bias=bias, **kwargs))
         layers.append(PCTopLayer(d_out=d_h, sigma_prior=sigma_prior, sigma_obs=sigma_obs,
                                  layer_index=n_layers-1, **kwargs))
         return layers

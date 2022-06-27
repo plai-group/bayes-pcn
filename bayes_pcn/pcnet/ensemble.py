@@ -30,7 +30,7 @@ class PCNetEnsemble:
         self._beta_forget = kwargs.get('beta_forget')
         act_fn = ActFn.get_enum_from_value(act_fn)
 
-        base_models_init_args = dict(n_models=n_models, act_fn=act_fn)
+        base_models_init_args = dict(n_models=n_models, act_fn=act_fn, bias=kwargs.get('bias'))
         if LayerUpdateStrat.get_enum_from_value(layer_update_strat) == LayerUpdateStrat.MHN:
             # HACK: Makes MHN memory efficient
             base_models_init_args['economy_mode'] = True
@@ -172,12 +172,15 @@ class PCNetEnsemble:
         rebind_info = dict(delete=delete_result, learn=learn_result)
         return UpdateResult(pcnets=None, log_weights=None, info=rebind_info)
 
-    def sample(self, d_batch: int = 1, a_group: ActivationGroup = None) -> Sample:
+    def sample(self, d_batch: int = 1, a_group: ActivationGroup = None,
+               X_top: torch.Tensor = None) -> Sample:
         """Select a base model based on its importance weight and sample from that model.
 
         Args:
             d_batch (int, optional): Number of datapoints to sample. Defaults to 1.
             a_group (ActivationGroup, optional): Only used in Gibbs sampling. Defaults to None.
+            X_top (torch.Tensor, optional): Only used for sampling with GMM prior on the topmost
+                                            layer of a hierarchical network. Defaults to None.
 
         Returns:
             (Sample): Sample object with <d_batch x x_dim> data and <d_batch> log joint tensors.
@@ -189,7 +192,8 @@ class PCNetEnsemble:
         for index, count in zip(indices.tolist(), counts.tolist()):
             if count > 0:
                 X_obs = None if a_group is None else a_group.get_acts(layer_index=0, detach=True)
-                sample, sample_a_group = self._pcnets[index].sample(d_batch=count, X_obs=X_obs)
+                pcnet = self._pcnets[index]
+                sample, sample_a_group = pcnet.sample(d_batch=count, X_obs=X_obs, X_top=X_top)
                 info.append((sample, sample_a_group))
 
         random.shuffle(info)
