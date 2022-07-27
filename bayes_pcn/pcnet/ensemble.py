@@ -139,12 +139,16 @@ class PCNetEnsemble:
         activations = [X_obs]
         if self.activation_init_strat == ActInitStrat.FIXED:
             for _ in range(self._n_layers-1):
-                activation = self._h_dim**-0.5 * torch.ones(d_batch, self._h_dim).to(self.device)
-                activations.append(activation)
+                activation = self._h_dim**-0.5 * torch.ones(d_batch, self._h_dim)
+                activations.append(activation.to(self.device))
         elif self.activation_init_strat == ActInitStrat.RANDN:
             for _ in range(self._n_layers-1):
-                activation = self._h_dim**-0.5 * torch.randn(d_batch, self._h_dim).to(self.device)
-                activations.append(activation)
+                activation = self._h_dim**-0.5 * torch.randn(d_batch, self._h_dim)
+                activations.append(activation.to(self.device))
+        elif self.activation_init_strat == ActInitStrat.RANDNPLUS:
+            for _ in range(self._n_layers-1):
+                activation = self._h_dim**-0.5 * torch.randn(d_batch, self._h_dim).abs()
+                activations.append(activation.to(self.device))
         elif self.activation_init_strat == ActInitStrat.SAMPLE:
             raise NotImplementedError()
         else:

@@ -5,6 +5,24 @@ import torch.nn as nn
 from typing import List, Union
 
 
+"""
+TODO: Offline VI
+- Extend ActivationGroup to have a standard deviation parameter field
+  - Has same dimensionality as the activations
+  - Initialize params to -1. and set stdev to 0.01+sigmoid(params) (starting stdev of 0.2789)
+  - Modify get_acts() to return noised samples if .stochastic field is set to True and enable
+    stacking such noised samples on top of each other to obtain multi-sample ELBO estimate
+  - Clamping, merging, setting activations should all involve the standard deviation parameters
+  - Add sample() method to interface that draws from normal if stdev isn't none else returns mean
+- Create MLELBOUpdater that orchestrates ELBO maximization w.r.t. the activations and weights
+  - Have a method that accepts an ActivationGroup (representing the trained variational distribution
+    over the activations) and creates a clone PCNet whose weights minimize the expected reverse KL
+    between the weights and posterior
+- Modify maximize_log_joint method to check if ActivationGroup has standard deviation and
+  if so add the analytical negative entropy term to the log_joint
+"""
+
+
 class ActivationGroup:
     def __init__(self, activations: List[torch.Tensor], no_param: bool = False) -> None:
         """Contains all layer-wise activations of PCNets within PCNetEnsemble. Makes things

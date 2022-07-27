@@ -216,10 +216,10 @@ class PCLayer(AbstractPCLayer):
             result = F.softmax(X_in, dim=-1)
         elif self._act_fn == ActFn.LWTA_SPARSE:
             # Neuron groups of size layer dim / 16 inhibit each other
-            result = local_wta(X_in=X_in, block_size=X_in.shape[1]//16, hard=True)
+            result = local_wta(X_in=X_in, block_size=X_in.shape[1]//16, hard=False)
         elif self._act_fn == ActFn.LWTA_DENSE:
             # Every neighbouring neurons inhibit each other
-            result = local_wta(X_in=X_in, block_size=2, hard=True)
+            result = local_wta(X_in=X_in, block_size=2, hard=False)
         else:
             raise NotImplementedError()
 

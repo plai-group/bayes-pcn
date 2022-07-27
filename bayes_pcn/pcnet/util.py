@@ -252,6 +252,9 @@ def local_wta(X_in: torch.Tensor, block_size: int, hard: bool = True) -> torch.T
     assert d_orig % block_size == 0
     num_blocks = d_orig // block_size
     X_in = X_in.reshape(d_batch, num_blocks, block_size)
-    wta_fn = torch.argmax if hard else F.softmax
-    mask_matrix = F.one_hot(wta_fn(X_in, dim=-1), num_classes=block_size)
-    return (X_in * mask_matrix).reshape(d_batch, d_orig)
+    if hard:
+        mask_matrix = F.one_hot(torch.argmax(X_in, dim=-1), num_classes=block_size)
+        return (X_in * mask_matrix).reshape(d_batch, d_orig)
+    else:
+        beta = 8.
+        return F.softmax(X_in * beta, dim=-1).reshape(d_batch, d_orig)
