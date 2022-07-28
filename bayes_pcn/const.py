@@ -68,6 +68,7 @@ class Dataset(ArgParseEnum):
 class DatasetMode(ArgParseEnum):
     FAST = 'fast'
     MIX = 'mix'
+    MIX_HIGH = 'mix_high'
     WHITE = 'white'
     DROP = 'drop'
     MASK = 'mask'

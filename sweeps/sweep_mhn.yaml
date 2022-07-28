@@ -1,0 +1,44 @@
+project: "bayes-pcn-mhn"
+program: -mbayes_pcn
+method: grid
+parameters:
+  seed:
+    values: [0, 1, 2]
+  n-data:
+    value: [16, 32, 64, 128]
+  run-group:
+    value: "sweep-mhn-cifar-s012"
+  dataset:
+    value: "cifar10"
+  dataset-mode:
+    value: "all"
+  layer-update-strat:
+    value: "mhn"
+  act-fn:
+    value: "none"
+  n-layers:
+    value: 1
+  n-models:
+    value: 1
+  layer-log-prob-strat:
+    value: "map"
+  sigma-prior:
+    value: 1.
+  n-epoch:
+    value: 1
+  wandb-mode:
+    value: "online"
+  activation-lr:
+    value: 0.01
+  sigma-obs:
+    value: 0.01
+  sigma-data:
+    value: 0.01
+  layer-sample-strat:
+    value: "map"
+  ensemble-proposal-strat:
+    value: "mode"
+  ensemble-log-joint-strat:
+    value: "individual"
+  T-infer:
+    value: 500

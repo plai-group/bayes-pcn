@@ -79,7 +79,7 @@ def assess_metric(df_all: pd.DataFrame, metric: str, ascending: bool = True):
     df = df_all[cols]
     metric = metric + ('_mse' if ascending else '_acc')
     result = df.sort_values(metric, ascending=ascending)
-    print(result[:1])
+    print(result[:4])
     # pdb.set_trace()
     return result
 

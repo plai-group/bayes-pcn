@@ -28,7 +28,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument('--model-path', type=str, default='runs/debug/default/latest.pt')
     parser.add_argument('--dataset-mode', type=str, default='all',
-                        choices=['fast', 'mix', 'white', 'drop', 'mask', 'all'],
+                        choices=['fast', 'mix', 'mix_high', 'white', 'drop', 'mask', 'all'],
                         help='Specifies test dataset configuration.')
     parser.add_argument('--n-data', type=int, default=None)
     parser.add_argument('--n-batch', type=int, default=None)

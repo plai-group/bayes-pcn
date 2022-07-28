@@ -269,7 +269,7 @@ class PCLayer(AbstractPCLayer):
         self._R = self._R + Sigma_c_T_Sigma_x_inv.matmul(error)
         self._U = self._U - Sigma_c_T_Sigma_x_inv.matmul(Sigma_c)
         if not is_PD(self._U):
-            self._U = nearest_PD(A=self._U).to(Z_in.dtype)
+            self._U = nearest_PD(A=self._U.cpu()).to(Z_in.dtype).to(self._R.device)
         self._R, self._U = self._R.to(orig_dtype), self._U.to(orig_dtype)
 
     def _bayes_delete(self, X_obs: torch.Tensor, X_in: torch.Tensor) -> None:
@@ -281,7 +281,7 @@ class PCLayer(AbstractPCLayer):
 
         self._U = (self._U.inverse() - 1/self._Sigma * Z_in.T.matmul(Z_in)).inverse()
         if not is_PD(self._U):
-            self._U = nearest_PD(A=self._U).to(Z_in.dtype)
+            self._U = nearest_PD(A=self._U.cpu()).to(Z_in.dtype).to(self._R.device)
 
         Sigma_c = Z_in.matmul(self._U)
         inv_term_R = Sigma_c.matmul(Z_in.T) + self._Sigma * torch.eye(d_batch).to(self.device)

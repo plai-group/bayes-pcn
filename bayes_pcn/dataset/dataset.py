@@ -146,6 +146,10 @@ def get_transforms(config: str):
         noise_transforms = {'white0.2': WhiteNoise(var=0.2**2),
                             'drop0.25': DropoutNoise(p=0.25),
                             'mask0.25': MaskingNoise(p=0.25)}
+    elif config == 'mix_high':
+        noise_transforms = {'white0.8': WhiteNoise(var=0.8**2),
+                            'drop0.75': DropoutNoise(p=0.75),
+                            'mask0.75': MaskingNoise(p=0.75)}
     elif config == 'white':
         noise_transforms = {'white0.2': WhiteNoise(var=0.2**2),
                             'white0.4': WhiteNoise(var=0.4**2),
