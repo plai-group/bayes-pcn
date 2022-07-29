@@ -3,7 +3,7 @@ program: -mbayes_pcn
 method: grid
 parameters:
   act-fn:
-    value: ["relu", "gelu"]
+    values: ["relu", "gelu"]
   n-models:
     value: 1
   seed:
