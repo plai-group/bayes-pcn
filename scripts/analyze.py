@@ -25,9 +25,9 @@ def aggregate_seed(df_all: pd.DataFrame):
     # print([c for c in param_cols if len(df_all[c].unique()) > 1])
     grouped = df_all.groupby(param_cols, as_index=False)
     df_all = grouped[stat_cols].mean()
-    # df_stdevs = grouped[stat_cols].std()
-    # for c in stat_cols:
-    #     df_all[f'{c}_std'] = df_stdevs[c]
+    df_stdevs = grouped[stat_cols].std()
+    for c in stat_cols:
+        df_all[f'{c}_std'] = df_stdevs[c]
     return df_all
 
 
@@ -79,7 +79,7 @@ def assess_metric(df_all: pd.DataFrame, metric: str, ascending: bool = True):
     df = df_all[cols]
     metric = metric + ('_mse' if ascending else '_acc')
     result = df.sort_values(metric, ascending=ascending)
-    print(result[:4])
+    print(result[:3].to_markdown())
     # pdb.set_trace()
     return result
 

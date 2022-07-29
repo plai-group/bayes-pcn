@@ -1,31 +1,25 @@
-project: "bayes-pcn-mhn"
+project: "bayes-pcn-seq-small"
 program: -mbayes_pcn
 method: grid
 parameters:
-  seed:
-    values: [0, 1, 2]
-  n-data:
-    values: [16, 32, 64, 128]
-  run-group:
-    value: "sweep-mhn-tin-s012"
-  dataset:
-    value: "tinyimagenet"
-  dataset-mode:
-    value: "all"
-  layer-update-strat:
-    value: "mhn"
   act-fn:
-    value: "none"
-  n-layers:
-    value: 1
+    value: ["relu", "gelu"]
   n-models:
     value: 1
+  seed:
+    values: [0, 1, 2]
+  h-dim:
+    value: 256
+  n-layers:
+    value: 4
   layer-log-prob-strat:
-    value: "map"
+    value: "p_pred"
   sigma-prior:
     value: 1.
   n-epoch:
     value: 1
+  run-group:
+    value: "sweep-seq-small-cifar-s012"
   wandb-mode:
     value: "online"
   activation-lr:
@@ -36,9 +30,19 @@ parameters:
     value: 0.01
   layer-sample-strat:
     value: "map"
+  layer-update-strat:
+    value: "bayes"
   ensemble-proposal-strat:
     value: "mode"
   ensemble-log-joint-strat:
     value: "individual"
+  dataset:
+    value: "cifar10"
+  dataset-mode:
+    value: "all"
+  n-data:
+    value: 128
+  n-batch:
+    value: 1
   T-infer:
     value: 500

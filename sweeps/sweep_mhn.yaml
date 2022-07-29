@@ -5,7 +5,7 @@ parameters:
   seed:
     values: [0, 1, 2]
   n-data:
-    value: [16, 32, 64, 128]
+    values: [16, 32, 64, 128]
   run-group:
     value: "sweep-mhn-cifar-s012"
   dataset:
