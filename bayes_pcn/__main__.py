@@ -32,7 +32,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument('--h-dim', type=int, default=256)
     parser.add_argument('--sigma-prior', type=float, default=1.)
     parser.add_argument('--sigma-obs', type=float, default=0.01)
-    parser.add_argument('--sigma-data', type=float, default=0.01)
+    parser.add_argument('--sigma-data', type=float, default=None)
     parser.add_argument('--beta-forget', type=float, default=0., help='between 0-1. 0 = no forget.')
     parser.add_argument('--scale-layer', action='store_true', help='normalize layer activations.')
     parser.add_argument('--bias', action='store_true', help='Use bias alongside linear transform.')
