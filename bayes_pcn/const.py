@@ -45,9 +45,9 @@ class EnsembleProposalStrat(ArgParseEnum):
 
 
 class ActInitStrat(ArgParseEnum):
-    FIXED = 'fixed'           # Initialize hidden activation values to self._h_dim ** -0.5
-    RANDN = 'randn'           # Initialize hidden activation values to kaiming normal samples
-    SAMPLE = 'sample'         # Initialize hidden activation values to model samples
+    FIXED = 'fixed'          # Initialize hidden activation values to self._h_dim ** -0.5
+    RANDN = 'randn'          # Initialize hidden activation values to kaiming normal samples
+    SAMPLE = 'sample'        # Initialize hidden activation values to model samples
     RANDNPLUS = 'randnplus'  # Initialize hidden activation values to truncated kaiming normal
 
 
@@ -63,6 +63,8 @@ class ActFn(ArgParseEnum):
 
 class Dataset(ArgParseEnum):
     CIFAR10 = 'cifar10'
+    TINYIMAGENET = 'tinyimagenet'
+    FLICKR30K = 'flickr30k'
 
 
 class DatasetMode(ArgParseEnum):

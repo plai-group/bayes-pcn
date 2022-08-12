@@ -56,7 +56,7 @@ def get_parser() -> argparse.ArgumentParser:
                         default=MHNMetric.DOT, choices=list(MHNMetric))
 
     # data configs
-    parser.add_argument('--dataset', type=str, choices=['cifar10', 'tinyimagenet'],
+    parser.add_argument('--dataset', type=str, choices=['cifar10', 'tinyimagenet', 'flickr30k'],
                         default='cifar10')
     parser.add_argument('--dataset-mode', type=str, default='fast',
                         choices=['fast', 'mix', 'white', 'drop', 'mask', 'all'],

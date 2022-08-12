@@ -130,6 +130,51 @@ class TinyImageNetRecall(TinyImageNetDataset):
         return img, fixed_indices
 
 
+class Flickr30kRecall(datasets.Flickr30k):
+    """Wrapper around CIFAR10 dataset that, instead of returning target image class, returns
+    image indices to hold fixed during recall if applicable. These indices can be pixels that
+    we know to be unnoised.
+
+    TODO: Tokenize, Embed, and Concatenate Captions to Datapoints
+    """
+    def __init__(self, root: str, train: bool = True, noise_transform: Optional[Callable] = None,
+                 transform: Optional[Callable] = None, transform_post: Optional[Callable] = None,
+                 target_transform: Optional[Callable] = None, download: bool = False) -> None:
+        img_root = os.path.join(root, 'flickr30k-images')
+        ann_file = os.path.join(root, 'results_20130124.token')
+        super().__init__(root=img_root, ann_file=ann_file, transform=transform,
+                         target_transform=target_transform)
+        self.noise_transform = noise_transform
+        self.transform_post = transform_post
+
+    def __getitem__(self, index: int) -> Tuple[Any, Any]:
+        img_id = self.ids[index]
+
+        # Image
+        filename = os.path.join(self.root, img_id)
+        img = Image.open(filename).convert('RGB')
+
+        # Captions (take only the first one)
+        target = self.annotations[img_id][0]
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        # doing this so that it is consistent with all other datasets
+        # to return a PIL Image
+        if self.transform is not None:
+            img = self.transform(img)
+
+        if self.noise_transform is not None:
+            img, fixed_indices = self.noise_transform(img)
+        else:
+            fixed_indices = torch.zeros(img.shape)
+
+        if self.transform_post is not None:
+            img = self.transform_post(img)
+
+        return img, fixed_indices
+
+
 def separate_train_test(loaders: Dict[str, DataLoader]) -> Tuple[DataLoader, Dict[str, DataLoader]]:
     train_loader = loaders['train']
     test_loaders = {name: loader for name, loader in loaders.items() if name != 'train'}
@@ -215,6 +260,15 @@ def tinyimagenet(**kwargs) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader]
     return learn_loaders, score_loaders, info
 
 
+def flickr30k(**kwargs) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader], Dict[str, Any]]:
+    x_dim = 3 * 64 * 64
+    learn_loaders, score_loaders, train, tests = get_dataset(dataset_cls=Flickr30kRecall,
+                                                             **kwargs)
+    classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+    info = {'classes': classes, 'train': train, 'test': tests, 'x_dim': x_dim}
+    return learn_loaders, score_loaders, info
+
+
 def dataset_dispatcher(args):
     data_size = args.n_data
     args.n_batch = data_size if args.n_batch is None else args.n_batch
@@ -238,5 +292,7 @@ def dataset_dispatcher(args):
     elif args.dataset == 'tinyimagenet':
         dataset_args['max_samples'] = data_size
         return tinyimagenet(**dataset_args)
+    elif args.dataset == 'flickr30k':
+        return flickr30k(**dataset_args)
     else:
         raise NotImplementedError()
