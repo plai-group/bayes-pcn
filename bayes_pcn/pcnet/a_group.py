@@ -5,26 +5,9 @@ import torch.nn as nn
 from typing import List, Union
 
 
-"""
-TODO: Offline VI
-- Extend ActivationGroup to have a standard deviation parameter field
-  - Has same dimensionality as the activations
-  - Initialize params to -1. and set stdev to 0.01+sigmoid(params) (starting stdev of 0.2789)
-  - Modify get_acts() to return noised samples if .stochastic field is set to True and enable
-    stacking such noised samples on top of each other to obtain multi-sample ELBO estimate
-  - Clamping, merging, setting activations should all involve the standard deviation parameters
-  - Add sample() method to interface that draws from normal if stdev isn't none else returns mean
-- Create MLELBOUpdater that orchestrates ELBO maximization w.r.t. the activations and weights
-  - Have a method that accepts an ActivationGroup (representing the trained variational distribution
-    over the activations) and creates a clone PCNet whose weights minimize the expected reverse KL
-    between the weights and posterior
-- Modify maximize_log_joint method to check if ActivationGroup has standard deviation and
-  if so add the analytical negative entropy term to the log_joint
-"""
-
-
 class ActivationGroup:
-    def __init__(self, activations: List[torch.Tensor], no_param: bool = False) -> None:
+    def __init__(self, activations: List[torch.Tensor], no_param: bool = False,
+                 stochastic: bool = False) -> None:
         """Contains all layer-wise activations of PCNets within PCNetEnsemble. Makes things
         easier to work with PyTorch optimizers. Does not modify bottom-most activations.
         NOTE: Layer activations are not parameters if no_param is not true to
@@ -45,6 +28,16 @@ class ActivationGroup:
             self._data.append(layer_acts)
             self._dims.append(layer_acts.shape[-1])
         self._d_batch: int = layer_acts.shape[0]
+
+        # If stochastic, initialize standard deviation parameters
+        self._stochastic = stochastic
+        self._stdev_params = [] if stochastic else None
+        if self._stochastic:
+            for layer_acts in activations[1:]:
+                layer_stdev_params = -5 * torch.ones_like(layer_acts)
+                if not no_param:
+                    layer_stdev_params = nn.Parameter(layer_stdev_params)
+                self._stdev_params.append(layer_stdev_params)
 
     def get_acts(self, layer_index: int, detach: bool = True) -> torch.Tensor:
         if layer_index >= len(self._data):
@@ -70,6 +63,11 @@ class ActivationGroup:
         result = [layer_acts[data_index:data_index+1] for layer_acts in self._data]
         return torch.cat(result, dim=-1) if flatten else result
 
+    def get_datapoint_stdevs(self, data_index: int, flatten: bool = False
+                             ) -> Union[List[torch.Tensor], torch.Tensor]:
+        result = [stdevs[data_index:data_index+1] for stdevs in self.stdevs]
+        return torch.cat(result, dim=-1) if flatten else result
+
     def clamp(self, obs: bool = None, hidden: bool = None) -> None:
         assert (obs is not None) or (hidden is not None)
         if obs is not None:
@@ -77,6 +75,8 @@ class ActivationGroup:
         if hidden is not None:
             for i in range(1, len(self._data)):
                 self._data[i].requires_grad = not hidden
+                if self.stochastic:
+                    self._stdev_params[i-1].requires_grad = not hidden
 
     @classmethod
     def from_concatenated(cls, activations: torch.Tensor, dims: List[int]) -> 'ActivationGroup':
@@ -119,6 +119,17 @@ class ActivationGroup:
     @property
     def data(self):
         return self._data
+
+    @property
+    def stochastic(self):
+        return self._stochastic
+
+    @property
+    def stdevs(self) -> torch.Tensor:
+        if self._stochastic:
+            return [0.005+torch.sigmoid(l_stdev_params) for l_stdev_params in self._stdev_params]
+        else:
+            return None
 
     @property
     def dims(self):

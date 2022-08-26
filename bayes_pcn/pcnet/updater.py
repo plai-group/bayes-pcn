@@ -14,7 +14,7 @@ class AbstractUpdater(ABC):
                  infer_lr: float, infer_T: int, proposal_strat: EnsembleProposalStrat,
                  n_proposal_samples: int, activation_optim: str,
                  ensemble_log_joint: Callable[[ActivationGroup, LayerLogProbStrat],
-                 torch.Tensor] = None, **kwargs) -> None:
+                 torch.Tensor] = None, n_elbo_particles: int = 1, **kwargs) -> None:
         self._activation_init_fn: Callable[[torch.Tensor], ActivationGroup] = activation_init_fn
         self._activation_optim = activation_optim
         self._infer_lr = infer_lr
@@ -23,6 +23,7 @@ class AbstractUpdater(ABC):
         self._n_proposal_samples = n_proposal_samples
         self._shared_log_joint = ensemble_log_joint is not None
         self._ensemble_log_joint = ensemble_log_joint
+        self._n_elbo_particles = n_elbo_particles
 
     @abstractmethod
     def __call__(self, X_obs: torch.Tensor, pcnets: List[PCNet], log_weights: torch.Tensor,
@@ -62,7 +63,14 @@ class MLUpdater(AbstractUpdater):
             a_group.clamp(obs=True, hidden=False)
             fit_info = maximize_log_joint(log_joint_fn=pcnet.log_joint, a_group=a_group,
                                           infer_T=self._infer_T, infer_lr=self._infer_lr,
-                                          activation_optim=self._activation_optim)
+                                          activation_optim=self._activation_optim,
+                                          n_particles=self._n_elbo_particles)
+            if a_group.stochastic:
+                # HACK: Sample from the variational distribution
+                for i in range(1, len(a_group.data)):
+                    noise = a_group.stdevs[i-1] * torch.randn_like(a_group.stdevs[i-1])
+                    new_layer_acts = a_group.get_acts(layer_index=i, detach=True) + noise
+                    a_group.set_acts(layer_index=i, value=new_layer_acts)
             pcnet.update_weights(a_group=a_group, lr=kwargs.get('weight_lr', self._weight_lr))
             info[f"model_{i}"] = fit_info
         return UpdateResult(pcnets=new_pcnets, log_weights=log_weights, info=info)
@@ -205,7 +213,8 @@ class AbstractVLBUpdater(AbstractUpdater):
         a_group.clamp(obs=True, hidden=False)
         fit_info = maximize_log_joint(log_joint_fn=log_joint_fn, a_group=a_group,
                                       infer_T=self._infer_T, infer_lr=self._infer_lr,
-                                      activation_optim=self._activation_optim)
+                                      activation_optim=self._activation_optim,
+                                      n_particles=self._n_elbo_particles)
         proposal = self._build_proposal(log_joint_fn=log_joint_fn, a_group=a_group)
         return proposal, {'layer_dims': a_group.dims, **fit_info}
 
@@ -257,6 +266,24 @@ class VLBModeUpdater(AbstractVLBUpdater):
         X_obs = a_group.get_acts(layer_index=0)
         dims = a_group.dims
         return Dirac(mean_vectors=mean_vectors, X_obs=X_obs, dims=dims)
+
+
+class ReparamVIUpdater(AbstractVLBUpdater):
+    def _build_proposal(self, log_joint_fn: Callable[[ActivationGroup, LayerLogProbStrat],
+                        torch.Tensor], a_group: ActivationGroup) -> BaseDistribution:
+        mean_vectors = []
+        stdev_vectors = []
+        X_obs = a_group.get_acts(layer_index=0, detach=True)
+        dims = a_group.dims
+        for i in range(a_group.d_batch):
+            mean_vector = a_group.get_datapoint(data_index=i, flatten=True)[:, a_group.dims[0]:]
+            mean_vectors.append(mean_vector)
+            stdev_vector = a_group.get_datapoint_stdevs(data_index=i, flatten=True)
+            stdev_vectors.append(stdev_vector)
+        mean_vectors = torch.cat(mean_vectors, dim=0)
+        stdev_vectors = torch.cat(stdev_vectors, dim=0)
+        return DiagMVN(mean_vectors=mean_vectors, stdev_vectors=stdev_vectors,
+                       X_obs=X_obs, dims=dims)
 
 
 class VLBFullUpdater(AbstractVLBUpdater):

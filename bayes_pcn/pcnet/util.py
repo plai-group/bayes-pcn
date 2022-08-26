@@ -64,6 +64,28 @@ class Dirac(BaseDistribution):
         return torch.zeros(a_group.d_batch).to(self.device)
 
 
+class DiagMVN(BaseDistribution):
+    def __init__(self, mean_vectors: torch.Tensor, stdev_vectors: torch.Tensor,
+                 X_obs: torch.Tensor, dims: List[int]) -> None:
+        self.mean_vectors = mean_vectors.clone()
+        self.stdev_vectors = stdev_vectors.clone()
+        self.X_obs = X_obs.clone()
+        self.dims = dims
+        self.device = X_obs.device
+
+    def sample(self) -> ActivationGroup:
+        h_activations = self.mean_vectors + self.stdev_vectors*torch.randn_like(self.stdev_vectors)
+        activations = torch.cat((self.X_obs, h_activations), dim=-1)
+        a_group = ActivationGroup.from_concatenated(activations=activations, dims=self.dims)
+        a_group.device = self.device
+        return a_group
+
+    def log_prob(self, a_group: ActivationGroup) -> torch.Tensor:
+        data = a_group.get_data(flatten=True, no_obs=True)
+        log_prob = dists.Normal(loc=self.mean_vectors, scale=self.stdev_vectors).log_prob(data)
+        return log_prob.sum(dim=-1).to(self.device)
+
+
 def safe_mvn(mean_vectors: torch.Tensor, precision_matrices: torch.Tensor
              ) -> dists.MultivariateNormal:
     try:
@@ -98,10 +120,49 @@ class MVN(BaseDistribution):
         return self.dist.log_prob(data)
 
 
+def estimate_free_energy(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
+                         a_group: ActivationGroup, n_particles: int = 1) -> torch.Tensor:
+    """Returns the free energy vecotr associated with the input ActivationGroup.
+    If a_group.stochastic is true, assume a normal variational distribution.
+    Otherwise, assume a Dirac delta variational distribution.
+
+    Args:
+        log_joint_fn (Callable[[ActivationGroup], torch.Tensor]): A function that accepts
+            an ActivationGroup object and returns log probability vector of shape <d_batch>.
+        a_group (ActivationGroup): Initial coordinate at the activation space.
+        n_particles (int, optional): How many particles to use for approximating the free energy.
+            Defaults to 1.
+
+    Returns:
+        torch.Tensor: A vector of shape <d_batch> containing each datapoint's free energy.
+    """
+    if not a_group.stochastic:
+        elbo = log_joint_fn(a_group)
+        return -elbo
+
+    energy = 0.
+    for _ in range(n_particles):
+        activations = [a_group.data[0]]
+        for layer_acts, layer_stdevs in zip(a_group.data[1:], a_group.stdevs):
+            layer_acts_p = layer_acts + layer_stdevs * torch.randn_like(layer_stdevs)
+            activations.append(layer_acts_p)
+        a_group_p = ActivationGroup(activations=activations, no_param=True, stochastic=False)
+        energy -= log_joint_fn(a_group_p) / n_particles
+
+    entropy = [0.] * len(activations[0])
+    for layer_stdevs in a_group.stdevs:
+        for i_batch in range(len(entropy)):
+            entropy_li = 0.5*torch.logdet((2*torch.pi*torch.e*layer_stdevs[i_batch]).diag())
+            entropy[i_batch] = entropy[i_batch] + entropy_li
+    entropy = torch.tensor(entropy).to(energy.device)
+    elbo = entropy - energy
+    return -elbo
+
+
 def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
                        a_group: ActivationGroup, infer_T: int, infer_lr: float,
                        activation_optim: str, fixed_indices: torch.Tensor = None,
-                       **kwargs) -> Dict[str, List[float]]:
+                       n_particles: int = 1, **kwargs) -> Dict[str, List[float]]:
     """Move in the space of activation vectors to minimize log joint under the model.
     a_group is modified in place. To clarify, the model is defined by its log_joint_fn.
     Depending on what part of a_group is 'clamped' or not updated by gradient descent,
@@ -119,6 +180,8 @@ def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
         activation_optim (str): Which optimizer to use for gradient descent.
         fixed_indices (torch.Tensor, optional): Boolean matrix of shape <d_batch x d_out> that
             denotes which observation neuron indices to prevent modification. Defaults to None.
+        n_particles (int, optional): Number of particles to estimate free energy with if using
+        Gaussian variational distribution. Defaults to 1.
 
     Returns:
         List[float]: A dictionary with mean, min, and max batch loss over time.
@@ -126,7 +189,7 @@ def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
     mean_losses = []
     min_losses = []
     max_losses = []
-    prev_log_joint = None
+    prev_free_energy = None
     has_fixed_indices = fixed_indices_exists(fixed_indices=fixed_indices)
     if has_fixed_indices:
         a_group.clamp(obs=False, hidden=False)
@@ -141,8 +204,10 @@ def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
     optimizer.zero_grad()
 
     for _ in range(infer_T):
-        log_joint = log_joint_fn(a_group)
-        loss = -log_joint.sum(dim=0)
+        free_energy = estimate_free_energy(log_joint_fn=log_joint_fn, a_group=a_group,
+                                           n_particles=n_particles)
+        loss = free_energy.sum(dim=0)
+
         if loss.grad_fn is not None:
             loss.backward()
             optimizer.step()
@@ -155,10 +220,10 @@ def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
                 a_group.set_acts(layer_index=0, value=corrected_obs)
 
         mean_losses.append(loss.item() / a_group.d_batch)
-        min_losses.append(-log_joint.min().item())
-        max_losses.append(-log_joint.max().item())
-        early_stop = early_stop_infer(log_joint=log_joint, prev_log_joint=prev_log_joint)
-        prev_log_joint = log_joint.detach()
+        min_losses.append(free_energy.min().item())
+        max_losses.append(free_energy.max().item())
+        early_stop = early_stop_infer(free_energy=free_energy, prev_free_energy=prev_free_energy)
+        prev_free_energy = free_energy.detach()
         if early_stop:
             break
 
@@ -169,20 +234,20 @@ def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
     return {'mean_losses': mean_losses, 'min_losses': min_losses, 'max_losses': max_losses}
 
 
-def early_stop_infer(log_joint: torch.Tensor, prev_log_joint: torch.Tensor) -> bool:
+def early_stop_infer(free_energy: torch.Tensor, prev_free_energy: torch.Tensor) -> bool:
     """Signal that inference iteration should stop if all differences between current and
     past log joint scores are less than 0.001.
 
     Args:
-        log_joint (torch.Tensor): Current iteration log joint vector of shape <d_batch>.
-        prev_log_joint (torch.Tensor): Past iteration log joint vector of shape <d_batch>.
+        free_energy (torch.Tensor): Current iteration free energy vector of shape <d_batch>.
+        prev_free_energy (torch.Tensor): Past iteration free energy vector of shape <d_batch>.
 
     Returns:
         bool: Whether to stop inference iteration or not.
     """
-    if prev_log_joint is None:
+    if prev_free_energy is None:
         return False
-    return ((log_joint - prev_log_joint).abs() > 1e-3).sum() == 0
+    return ((free_energy - prev_free_energy).abs() > 1e-3).sum() == 0
 
 
 def ess_resample(objs: List[Any], log_weights: torch.Tensor, ess_thresh: float,

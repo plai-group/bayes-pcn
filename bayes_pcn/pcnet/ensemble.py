@@ -28,6 +28,7 @@ class PCNetEnsemble:
         self._activation_optim: str = activation_optim
         self._log_weights: torch.Tensor = (torch.ones(self._n_models) / self._n_models).log()
         self._beta_forget = kwargs.get('beta_forget')
+        self._n_elbo_particles = kwargs.get('n_elbo_particles')
         act_fn = ActFn.get_enum_from_value(act_fn)
 
         base_models_init_args = dict(n_models=n_models, act_fn=act_fn, bias=kwargs.get('bias'))
@@ -50,7 +51,8 @@ class PCNetEnsemble:
                               proposal_strat=self.ensemble_proposal_strat,
                               infer_lr=infer_lr, infer_T=infer_T,
                               n_proposal_samples=n_proposal_samples,
-                              activation_optim=activation_optim)
+                              activation_optim=activation_optim,
+                              n_elbo_particles=self._n_elbo_particles)
         if self.ensemble_log_joint_strat == EnsembleLogJointStrat.SHARED:
             update_fn_args['ensemble_log_joint'] = self.log_joint
 
@@ -62,6 +64,8 @@ class PCNetEnsemble:
             update_fn_args['resample'] = kwargs.get('resample', False)
             if self.ensemble_proposal_strat == EnsembleProposalStrat.MODE:
                 self._updater = VLBModeUpdater(**update_fn_args)
+            elif self.ensemble_proposal_strat == EnsembleProposalStrat.DIAG:
+                self._updater = BBVIUpdater(**update_fn_args)
             elif self.ensemble_proposal_strat == EnsembleProposalStrat.FULL:
                 self._updater = VLBFullUpdater(**update_fn_args)
             else:
@@ -118,7 +122,8 @@ class PCNetEnsemble:
                                                  infer_lr=self._infer_lr,
                                                  infer_T=self._infer_T,
                                                  fixed_indices=fixed_indices,
-                                                 activation_optim=self._activation_optim)
+                                                 activation_optim=self._activation_optim,
+                                                 n_particles=self._n_elbo_particles)
             # Update obs layer while fixing hidden layers
             if self._n_layers == 1 or not fixed_indices_exists(fixed_indices=fixed_indices):
                 a_group.clamp(obs=False, hidden=True)
@@ -153,7 +158,8 @@ class PCNetEnsemble:
             raise NotImplementedError()
         else:
             raise NotImplementedError()
-        return ActivationGroup(activations=activations)
+        use_activations_stdevs = self.ensemble_proposal_strat == EnsembleProposalStrat.DIAG
+        return ActivationGroup(activations=activations, stochastic=use_activations_stdevs)
 
     def learn(self, X_obs: torch.Tensor) -> UpdateResult:
         X_obs = X_obs.to(self.device)
