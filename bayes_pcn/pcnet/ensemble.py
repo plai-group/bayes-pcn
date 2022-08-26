@@ -65,7 +65,7 @@ class PCNetEnsemble:
             if self.ensemble_proposal_strat == EnsembleProposalStrat.MODE:
                 self._updater = VLBModeUpdater(**update_fn_args)
             elif self.ensemble_proposal_strat == EnsembleProposalStrat.DIAG:
-                self._updater = BBVIUpdater(**update_fn_args)
+                self._updater = ReparamVIUpdater(**update_fn_args)
             elif self.ensemble_proposal_strat == EnsembleProposalStrat.FULL:
                 self._updater = VLBFullUpdater(**update_fn_args)
             else:
