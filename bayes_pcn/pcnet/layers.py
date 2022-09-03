@@ -7,7 +7,7 @@ import pyro
 import pyro.distributions as pdists
 
 from bayes_pcn.const import *
-from bayes_pcn.pcnet.util import is_PD, nearest_PD, local_wta
+from bayes_pcn.pcnet.util import dpfp, is_PD, nearest_PD, local_wta, normalize
 
 
 class AbstractPCLayer(ABC):
@@ -32,9 +32,6 @@ class AbstractPCLayer(ABC):
         if self._update_strat == LayerUpdateStrat.ML:
             self._ml_update(X_obs=X_obs, **kwargs)
         elif self._update_strat == LayerUpdateStrat.BAYES:
-            # beta_forget = kwargs.pop('beta_forget', 0.)
-            # if beta_forget > 0.:
-            #    self.bayes_forget(beta_forget=beta_forget)
             self._bayes_update(X_obs=X_obs, **kwargs)
         else:
             raise NotImplementedError()
@@ -123,12 +120,14 @@ class PCLayer(AbstractPCLayer):
         self._act_fn = act_fn
         self._weight_lr = kwargs.get('weight_lr', None)
         self._bias = kwargs.get('bias', None)
+        if self._act_fn == ActFn.DPFP:
+            self._d_in = 2 * self._d_in
         if self._bias:
             self._d_in = self._d_in + 1
         if kwargs.get('scale_layer', False):
             self._layer_norm = torch.nn.LayerNorm(self._d_in, elementwise_affine=False)
         else:
-            self._layer_norm = None
+            self._layer_norm = None  # normalize
 
         # MatrixNormal prior mean matrix
         self._R = torch.empty(self._d_in, self._d_out)
@@ -204,6 +203,9 @@ class PCLayer(AbstractPCLayer):
         return sample
 
     def _f(self, X_in: torch.Tensor) -> torch.Tensor:
+        # NOTE: To perform value normalization uncomment the line below and normalize
+        # lower layer activations at pcnet.py update_weights function.
+        # X_in = normalize(X_in=X_in)
         if self._act_fn == ActFn.NONE:
             result = X_in
         elif self._act_fn == ActFn.RELU:
@@ -220,6 +222,8 @@ class PCLayer(AbstractPCLayer):
         elif self._act_fn == ActFn.LWTA_DENSE:
             # Every neighbouring neurons inhibit each other
             result = local_wta(X_in=X_in, block_size=2, hard=False)
+        elif self._act_fn == ActFn.DPFP:
+            result = dpfp(X_in=X_in, nu=1)
         else:
             raise NotImplementedError()
 

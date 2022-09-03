@@ -60,6 +60,7 @@ class ActFn(ArgParseEnum):
     SOFTMAX = 'softmax'
     LWTA_SPARSE = 'lwta_sparse'
     LWTA_DENSE = 'lwta_dense'
+    DPFP = 'dpfp'
 
 
 class Dataset(ArgParseEnum):

@@ -323,3 +323,25 @@ def local_wta(X_in: torch.Tensor, block_size: int, hard: bool = True) -> torch.T
     else:
         beta = 8.
         return F.softmax(X_in * beta, dim=-1).reshape(d_batch, d_orig)
+
+
+def dpfp(X_in: torch.Tensor, nu: int = 1) -> torch.Tensor:
+    """Projects the input to a higher dimensional space, promoting sparsity and orthogonality.
+    Refer to https://arxiv.org/pdf/2102.11174.pdf.
+
+    Args:
+        X_in (torch.Tensor): Tensor of shape <d_batch x d_x>
+        nu (int, optional): Capacity controlling hyperparameter. Defaults to 1.
+
+    Returns:
+        torch.Tensor: Tensor of size <d_batch x (2 * d_x * nu)>
+    """
+    x = torch.cat([torch.nn.functional.relu(X_in), torch.nn.functional.relu(-X_in)], dim=-1)
+    # x = torch.cat([torch.nn.functional.elu(X_in)+1, torch.nn.functional.elu(-X_in)+1], dim=-1)
+    x_rolled = torch.cat([x.roll(shifts=j, dims=-1) for j in range(1, nu+1)], dim=-1)
+    x_repeat = torch.cat([x] * nu, dim=-1)
+    return x_repeat * x_rolled
+
+
+def normalize(X_in: torch.Tensor) -> torch.Tensor:
+    return X_in / torch.norm(X_in, p=2, dim=-1, keepdim=True)
