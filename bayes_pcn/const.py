@@ -24,9 +24,10 @@ class LayerSampleStrat(ArgParseEnum):
 
 
 class LayerUpdateStrat(ArgParseEnum):
-    ML = 'ml'        # Gradient descent update on weights given activations
-    BAYES = 'bayes'  # Conjugate Bayesian update on weights given activations
-    MHN = 'mhn'      # Create a new PCNet model per observation
+    ML = 'ml'          # Gradient descent update on weights given activations
+    BAYES = 'bayes'    # Conjugate Bayesian update on weights given activations
+    MHN = 'mhn'        # Create a new PCNet model per observation
+    KERNEL = 'kernel'  # Gaussian process "weight update" given activations
 
 
 class EnsembleLogJointStrat(ArgParseEnum):
@@ -61,6 +62,12 @@ class ActFn(ArgParseEnum):
     LWTA_SPARSE = 'lwta_sparse'
     LWTA_DENSE = 'lwta_dense'
     DPFP = 'dpfp'
+
+
+class Kernel(ArgParseEnum):
+    RELU = 'relu'
+    ARCCOS = 'arccos'
+    RBF = 'rbf'
 
 
 class Dataset(ArgParseEnum):

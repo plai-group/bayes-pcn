@@ -133,6 +133,7 @@ class PCLayer(AbstractPCLayer):
         self._R = torch.empty(self._d_in, self._d_out)
         # torch.nn.init.kaiming_uniform_(self._R, a=5**0.5)
         torch.nn.init.kaiming_normal_(self._R, nonlinearity='linear')
+        # self._R = torch.zeros(self._d_in, self._d_out)
         self._R_original = deepcopy(self._R)
         # MatrixNormal prior row-wise covariance matrix (initially isotropic)
         self._U = torch.eye(self._d_in) * sigma_prior ** 2
@@ -156,17 +157,14 @@ class PCLayer(AbstractPCLayer):
         if log_prob_strat == LayerLogProbStrat.MAP:
             marginal_Sigma = self._Sigma
         elif log_prob_strat == LayerLogProbStrat.P_PRED:
-            # if d_batch > 1:
-            #     # This is the proper thing to do when d_batch > 1: Batches are not independent
-            #     # in general, although it is at the top layer
-            #     marginal_Sigma = self._Sigma * torch.eye(d_batch).to(self.device)\
-            #                     + Z_in.matmul(self._U).matmul(Z_in.T)
-            #     # dist = dists.MultivariateNormal(marginal_mean.T, marginal_Sigma)
-            #     # return dist.log_prob(X_obs.T).sum().unsqueeze(0)
-            #     error_mean = torch.zeros(d_batch).to(self.device)
-            #     dist = dists.MultivariateNormal(error_mean, marginal_Sigma)
-            #     return dist.log_prob(X_obs.T - marginal_mean.T).sum().unsqueeze(0)
-            # marginal_Sigma = self._Sigma + Z_in.matmul(self._U).matmul(Z_in.T).squeeze()
+            d_batch = X_in.shape[0]
+            if d_batch > 1:
+                # This is the proper thing to do when d_batch > 1: Batches are not independent.
+                marginal_Sigma = self._Sigma * torch.eye(d_batch).to(self.device)\
+                                + Z_in.matmul(self._U).matmul(Z_in.T)
+                error_mean = torch.zeros(d_batch).to(self.device)
+                dist = dists.MultivariateNormal(error_mean, marginal_Sigma)
+                return dist.log_prob(X_obs.T - marginal_mean.T).sum().unsqueeze(0)
             marginal_Sigma = self._Sigma + Z_in.matmul(self._U).matmul(Z_in.T).diag().unsqueeze(-1)
         else:
             raise NotImplementedError()
@@ -357,11 +355,9 @@ class PCTopLayer(AbstractPCLayer):
             marginal_Sigma = self._Sigma
         elif log_prob_strat == LayerLogProbStrat.P_PRED:
             marginal_Sigma = self._Sigma + self._U[0, 0]
-            # if d_batch > 1:
-            #     # This is the proper thing to do when d_batch > 1: Batches are not independent
-            #     # in general, although it is at the top layer
-            #     dist = dists.Normal(marginal_mean, marginal_Sigma ** 0.5)
-            #     return dist.log_prob(X_obs).sum().unsqueeze(0)
+            if d_batch > 1:
+                dist = dists.Normal(marginal_mean, marginal_Sigma ** 0.5)
+                return dist.log_prob(X_obs).sum().unsqueeze(-1)
         else:
             raise NotImplementedError()
         dist = dists.Normal(marginal_mean, marginal_Sigma ** 0.5)
