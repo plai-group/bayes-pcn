@@ -262,25 +262,10 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
             # Plot mean L1 norms of the first PCNet parameters
             norm_info = dict()
             for i_layer, layer in enumerate(model._pcnets[0].layers):
-                norm_info[f"layer{i_layer+1}_R_norm"] = layer._R.abs().mean().item()
-                norm_info[f"layer{i_layer+1}_U_norm"] = layer._U.abs().mean().item()
-                norm_info[f"layer{i_layer+1}_U_diag_norm"] = layer._U.diag().abs().mean().item()
+                norm_info[f"layer{i_layer+1}_R_avg_norm"] = layer._R.abs().mean().item()
+                norm_info[f"layer{i_layer+1}_U_avg_norm"] = layer._U.abs().mean().item()
+                norm_info[f"layer{i_layer+1}_U_avg_diag_norm"] = layer._U.diag().abs().mean().item()
             wandb_dict.update(norm_info)
-
-            # # TMP!!!
-            # res = model.delete(X_obs=X_train)
-            # del_result, pred_batch = score_data_batch(data_batch=curr_batch, model=model,
-            #                                           acc_thresh=acc_thresh, n_repeat=n_repeat,
-            #                                           prefix='delete')
-            # wandb_dict.update(del_result)
-            # del_img = plot_data_batch(data_batch=pred_batch)
-            # ret = model.learn(X_obs=X_train)
-            # ret_result, pred_batch = score_data_batch(data_batch=curr_batch, model=model,
-            #                                           acc_thresh=acc_thresh, n_repeat=n_repeat,
-            #                                           prefix='return')
-            # wandb_dict.update(ret_result)
-            # ret_img = plot_data_batch(data_batch=pred_batch)
-            # # TMP!!!
 
             # Log to wandb
             wandb_dict = {f"iteration/{k}": v for k, v in wandb_dict.items()}
@@ -290,8 +275,6 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
             if not fast_mode:
                 wandb_dict["Initial Image"] = init_img
                 wandb_dict["Unseen Image"] = unseen_img
-            # wandb_dict["Deleted Image"] = del_img
-            # wandb_dict["Restored Image"] = ret_img
             wandb.log(wandb_dict)
 
         if should_save(index=i):

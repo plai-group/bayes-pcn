@@ -221,9 +221,15 @@ def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], torch.Tensor],
                 corrected_obs = orig_obs * fixed_indices + pred_obs * fixed_indices.logical_not()
                 a_group.set_acts(layer_index=0, value=corrected_obs)
 
-        mean_losses.append(loss.item() / a_group.d_batch)
-        min_losses.append(free_energy.min().item())
-        max_losses.append(free_energy.max().item())
+        # NOTE: min_losses/max_losses are misleading when batches are not i.i.d.
+        #       so just set them to average loss as well if that's the case.
+        mean_loss = loss.item() / a_group.d_batch
+        min_loss = free_energy.min().item() if len(free_energy) > 1 else mean_loss
+        max_loss = free_energy.max().item() if len(free_energy) > 1 else mean_loss
+        mean_losses.append(mean_loss)
+        min_losses.append(min_loss)
+        max_losses.append(max_loss)
+
         early_stop = early_stop_infer(free_energy=free_energy, prev_free_energy=prev_free_energy)
         prev_free_energy = free_energy.detach()
         if early_stop:
