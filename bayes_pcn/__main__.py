@@ -56,6 +56,8 @@ def get_parser() -> argparse.ArgumentParser:
                         choices=list(EnsembleProposalStrat))
     parser.add_argument('--mhn-metric', type=MHNMetric,
                         default=MHNMetric.DOT, choices=list(MHNMetric))
+    parser.add_argument('--kernel-type', type=Kernel,
+                        default=Kernel.RBF, choices=list(Kernel))
 
     # data configs
     parser.add_argument('--dataset', type=str, choices=['cifar10', 'tinyimagenet', 'flickr30k'],
@@ -110,7 +112,7 @@ def model_dispatcher(args: Dict[str, Any], dataset_info: Dict[str, Any]) -> PCNe
                          scale_layer=args.scale_layer, resample=args.resample,
                          weight_lr=args.weight_lr, beta_forget=args.beta_forget,
                          mhn_metric=args.mhn_metric, bias=args.bias,
-                         n_elbo_particles=args.n_elbo_particles)
+                         n_elbo_particles=args.n_elbo_particles, kernel_type=args.kernel_type)
 
 
 def run(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, DataLoader],

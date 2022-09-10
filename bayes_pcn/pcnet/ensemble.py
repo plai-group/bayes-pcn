@@ -30,8 +30,10 @@ class PCNetEnsemble:
         self._beta_forget = kwargs.get('beta_forget')
         self._n_elbo_particles = kwargs.get('n_elbo_particles')
         act_fn = ActFn.get_enum_from_value(act_fn)
+        kernel_type = Kernel.get_enum_from_value(kwargs.get('kernel_type'))
 
-        base_models_init_args = dict(n_models=n_models, act_fn=act_fn, bias=kwargs.get('bias'))
+        base_models_init_args = dict(n_models=n_models, act_fn=act_fn, bias=kwargs.get('bias'),
+                                     kernel_type=kernel_type)
         if LayerUpdateStrat.get_enum_from_value(layer_update_strat) == LayerUpdateStrat.MHN:
             # HACK: Makes MHN memory efficient
             base_models_init_args['economy_mode'] = True
@@ -60,7 +62,7 @@ class PCNetEnsemble:
             assert self.layer_log_prob_strat == LayerLogProbStrat.MAP
             update_fn_args['weight_lr'] = kwargs.get('weight_lr', None)
             self._updater = MLUpdater(**update_fn_args)
-        elif self.layer_update_strat == LayerUpdateStrat.BAYES:
+        elif self.layer_update_strat in [LayerUpdateStrat.BAYES, LayerUpdateStrat.KERNEL]:
             update_fn_args['resample'] = kwargs.get('resample', False)
             if self.ensemble_proposal_strat == EnsembleProposalStrat.MODE:
                 self._updater = VLBModeUpdater(**update_fn_args)

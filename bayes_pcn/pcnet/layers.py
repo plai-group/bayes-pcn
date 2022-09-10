@@ -7,7 +7,8 @@ import pyro
 import pyro.distributions as pdists
 
 from bayes_pcn.const import *
-from bayes_pcn.pcnet.util import dpfp, is_PD, nearest_PD, local_wta, normalize
+from bayes_pcn.pcnet.util import dpfp, get_kernel_sigmas, is_PD, nearest_PD, kernel_log_prob,\
+                                 kernel_posterior_params, local_wta, normalize
 
 
 class AbstractPCLayer(ABC):
@@ -33,6 +34,8 @@ class AbstractPCLayer(ABC):
             self._ml_update(X_obs=X_obs, **kwargs)
         elif self._update_strat == LayerUpdateStrat.BAYES:
             self._bayes_update(X_obs=X_obs, **kwargs)
+        elif self._update_strat == LayerUpdateStrat.KERNEL:
+            self._kernel_update(X_obs=X_obs, **kwargs)
         else:
             raise NotImplementedError()
 
@@ -131,15 +134,22 @@ class PCLayer(AbstractPCLayer):
 
         # MatrixNormal prior mean matrix
         self._R = torch.empty(self._d_in, self._d_out)
-        # torch.nn.init.kaiming_uniform_(self._R, a=5**0.5)
         torch.nn.init.kaiming_normal_(self._R, nonlinearity='linear')
-        # self._R = torch.zeros(self._d_in, self._d_out)
+        self._R = torch.zeros(self._d_in, self._d_out)
         self._R_original = deepcopy(self._R)
         # MatrixNormal prior row-wise covariance matrix (initially isotropic)
         self._U = torch.eye(self._d_in) * sigma_prior ** 2
         self._U_original = deepcopy(self._U)
         # Isotropic observation variance
         self._Sigma = sigma_obs ** 2
+
+        # Kernel related params
+        self._X_train = None
+        self._Y_train = None
+        self._kernel_type = kwargs.get('kernel_type', Kernel.RBF)
+        self._kernel_params = dict(Sigma_prior=sigma_prior**2, Sigma_obs=self._Sigma,
+                                   lengthscale=1/sigma_prior)
+        self._X_train_kernel = None
 
     def log_prob(self, X_obs: torch.Tensor, X_in: torch.Tensor, **kwargs) -> torch.Tensor:
         """Return log probability under the model, log p(x_{l} | x_{l+1}).
@@ -151,6 +161,13 @@ class PCLayer(AbstractPCLayer):
         Returns:
             torch.Tensor: Log probability vector of shape <d_batch>.
         """
+        if self._update_strat == LayerUpdateStrat.KERNEL:
+            # HACK: Create a new class for kernel stuff later
+            return kernel_log_prob(X_train=self._X_train, Y_train=self._Y_train,
+                                   X_test=X_in, Y_test=X_obs, kernel=self._kernel_type,
+                                   kernel_params=self._kernel_params,
+                                   Sigma_trtr_inv=self._X_train_kernel)
+
         Z_in = self._f(X_in)
         marginal_mean = self.predict(X_in=X_in)  # d_batch x d_out
         log_prob_strat = kwargs.get('log_prob_strat', self._log_prob_strat)
@@ -186,6 +203,15 @@ class PCLayer(AbstractPCLayer):
         Returns:
             torch.Tensor: Sampled lower layer neuron values of shape <d_batch x d_out>.
         """
+        if self._update_strat == LayerUpdateStrat.KERNEL:
+            # HACK: Create a new class for kernel stuff later
+            mus, Sigmas = kernel_posterior_params(X_train=self._X_train, Y_train=self._Y_train,
+                                                  X_test=X_in, kernel=self._kernel_type,
+                                                  kernel_params=self._kernel_params,
+                                                  Sigma_trtr_inv=self._X_train_kernel)
+            L = torch.linalg.cholesky(Sigmas)
+            return mus + L.matmul(torch.randn_like(mus))
+
         marginal_mean = self.predict(X_in=X_in)
         if self._sample_strat == LayerSampleStrat.MAP:
             marginal_Sigma = self._Sigma
@@ -253,7 +279,6 @@ class PCLayer(AbstractPCLayer):
         Args:
             X_obs (torch.Tensor): Lower layer neuron values of shape <d_batch x d_out>.
             X_in (torch.Tensor): Upper layer neuron values of shape <d_batch x d_in>.
-            lr (float, optional): Learning rate for layer weights.
         """
         d_batch = X_obs.shape[0]
         orig_dtype = X_obs.dtype
@@ -273,6 +298,21 @@ class PCLayer(AbstractPCLayer):
         if not is_PD(self._U):
             self._U = nearest_PD(A=self._U.cpu()).to(Z_in.dtype).to(self._R.device)
         self._R, self._U = self._R.to(orig_dtype), self._U.to(orig_dtype)
+
+    def _kernel_update(self, X_obs: torch.Tensor, X_in: torch.Tensor) -> None:
+        """_summary_
+
+        Args:
+            X_obs (torch.Tensor): Lower layer neuron values of shape <d_batch x d_out>.
+            X_in (torch.Tensor): Upper layer neuron values of shape <d_batch x d_in>.
+        """
+        self._X_train = X_in if self._X_train is None \
+            else torch.cat([self._X_train, X_in], dim=0)
+        self._Y_train = X_obs if self._Y_train is None \
+            else torch.cat([self._Y_train, X_obs], dim=0)
+        Sigma, _, _ = get_kernel_sigmas(X_train=self._X_train, X_test=None,
+                                        kernel=self._kernel_type, kernel_params=self._kernel_params)
+        self._X_train_kernel = Sigma.inverse()
 
     def _bayes_delete(self, X_obs: torch.Tensor, X_in: torch.Tensor) -> None:
         d_batch = X_obs.shape[0]
@@ -326,6 +366,7 @@ class PCTopLayer(AbstractPCLayer):
         # Normal prior mean vector
         self._R = torch.empty(d_out)
         torch.nn.init.normal_(self._R, 0, d_out**-0.5)
+        self._R = torch.zeros(d_out)
         if kwargs.get('economy_mode', False):
             # HACK: Makes MHN memory efficient
             self._U = torch.eye(1) * sigma_prior ** 2
@@ -404,6 +445,9 @@ class PCTopLayer(AbstractPCLayer):
         grad = self._error(X_obs=X_obs).sum(dim=0) / self._Sigma
         weight_lr = kwargs.get('lr', self._weight_lr)
         self._R = self._R + weight_lr / d_batch * grad
+
+    def _kernel_update(self, X_obs: torch.Tensor, **kwargs) -> None:
+        self._bayes_update(X_obs=X_obs, **kwargs)
 
     def _bayes_update(self, X_obs: torch.Tensor, **kwargs) -> None:
         """Bayesian normal normal conjugate update.
