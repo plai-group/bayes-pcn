@@ -133,8 +133,8 @@ class PCLayer(AbstractPCLayer):
             self._layer_norm = None  # normalize
 
         # MatrixNormal prior mean matrix
-        self._R = torch.empty(self._d_in, self._d_out)
-        torch.nn.init.kaiming_normal_(self._R, nonlinearity='linear')
+        # self._R = torch.empty(self._d_in, self._d_out)
+        # torch.nn.init.kaiming_normal_(self._R, nonlinearity='linear')
         self._R = torch.zeros(self._d_in, self._d_out)
         self._R_original = deepcopy(self._R)
         # MatrixNormal prior row-wise covariance matrix (initially isotropic)
@@ -175,7 +175,7 @@ class PCLayer(AbstractPCLayer):
             marginal_Sigma = self._Sigma
         elif log_prob_strat == LayerLogProbStrat.P_PRED:
             d_batch = X_in.shape[0]
-            if d_batch > 1:
+            if d_batch > 1 and not kwargs.get('batch_independence', False):
                 # This is the proper thing to do when d_batch > 1: Batches are not independent.
                 marginal_Sigma = self._Sigma * torch.eye(d_batch).to(self.device)\
                                 + Z_in.matmul(self._U).matmul(Z_in.T)
@@ -364,8 +364,8 @@ class PCTopLayer(AbstractPCLayer):
         self._weight_lr = kwargs.get('weight_lr', None)
 
         # Normal prior mean vector
-        self._R = torch.empty(d_out)
-        torch.nn.init.normal_(self._R, 0, d_out**-0.5)
+        # self._R = torch.empty(d_out)
+        # torch.nn.init.normal_(self._R, 0, d_out**-0.5)
         self._R = torch.zeros(d_out)
         if kwargs.get('economy_mode', False):
             # HACK: Makes MHN memory efficient
@@ -396,7 +396,7 @@ class PCTopLayer(AbstractPCLayer):
             marginal_Sigma = self._Sigma
         elif log_prob_strat == LayerLogProbStrat.P_PRED:
             marginal_Sigma = self._Sigma + self._U[0, 0]
-            if d_batch > 1:
+            if d_batch > 1 and not kwargs.get('batch_independence', False):
                 dist = dists.Normal(marginal_mean, marginal_Sigma ** 0.5)
                 return dist.log_prob(X_obs).sum().unsqueeze(-1)
         else:

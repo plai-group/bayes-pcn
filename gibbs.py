@@ -123,7 +123,7 @@ def sample_activations_posterior_mp(model: PCNetEnsemble, data_batch: DataBatch,
         a_group.clamp(obs=True, hidden=True)
         a_group.device = model.device
     posterior_sample = a_groups[-1]
-    ljs = [model.log_joint(a_group=a_group).sum().item() for a_group in a_groups]
+    ljs = [model.log_joint(a_group=a_group).log_prob.sum().item() for a_group in a_groups]
     mcmc_info = dict(model_0=dict(mean_losses=ljs, min_losses=ljs, max_losses=ljs))
     return posterior_sample, UpdateResult(pcnets=None, log_weights=None, info=mcmc_info)
 

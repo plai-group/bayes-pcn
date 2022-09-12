@@ -4,7 +4,7 @@ import pandas as pd
 import torch
 import torchvision
 from torch.utils.data import DataLoader
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 import wandb
 
 from bayes_pcn.pcnet.util import fixed_indices_exists
@@ -113,11 +113,8 @@ def plot_update_energy(update_result: UpdateResult, caption: str = None) -> wand
     Returns:
         wandb.Image: Weights and Biases image detailing the plot.
     """
-    update_info = update_result.info
-    model_names = []
-    all_mean_losses = []
-    all_min_losses = []
-    all_max_losses = []
+    update_info, model_names = update_result.info, []
+    all_mean_losses, all_min_losses, all_max_losses = [], [], []
     for model_name, model_fit_info in update_info.items():
         model_names.append(model_name)
         all_mean_losses.append(model_fit_info.get('mean_losses', []))
@@ -137,6 +134,35 @@ def plot_update_energy(update_result: UpdateResult, caption: str = None) -> wand
     img = fig2img(fig=fig, caption=caption)
     plt.close(fig)
     return img
+
+
+def plot_layerwise_update_energy(update_result: UpdateResult,
+                                 caption: str = None) -> List[wandb.Image]:
+    """Plot the layerwise loss trajectory of a batch.
+
+    Args:
+        update_result (UpdateResult): Update result from model.learn.
+
+    Returns:
+        List[wandb.Image]: A list of Weights and Biases images detailing the plot.
+    """
+    update_info = update_result.info
+    layerwise_mean_losses = update_info[list(update_info.keys())[0]]['layerwise_mean_losses']
+    n_iter, n_layer = len(layerwise_mean_losses), len(layerwise_mean_losses[0])
+
+    imgs = []
+    for i_layer in range(n_layer):
+        fig = plt.plot()
+        fig, ax = plt.subplots(ncols=1, nrows=1, squeeze=False, sharex=True, sharey=True)
+        ax_obj = ax[0, 0]
+        ax_obj.set_title(f"Layer {i_layer}")
+        x = [i for i in range(1, n_iter+1)]
+        y = [layerwise_mean_losses[i_iter][i_layer] for i_iter in range(n_iter)]
+        ax_obj.plot(x, y, 'r-')
+        fig.tight_layout()
+        imgs.append(fig2img(fig=fig, caption=caption))
+        plt.close(fig)
+    return imgs
 
 
 def generate_samples(model: PCNetEnsemble, X_shape: torch.Size, d_batch: int,
@@ -220,7 +246,8 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         curr_batch = get_next_data_batch(train_loader=train_loader, test_loaders=test_loaders)
         X_shape = curr_batch.original_shape
         wandb_dict = {"step": (epoch - 1) * len(train_loader) + i - (1 if epoch > 1 else 0)}
-        init_img, unseen_img, curr_img, gen_img, update_img = None, None, None, None, None
+        init_img, unseen_img, curr_img, gen_img = None, None, None, None
+        update_img, layer_update_imgs = None, []
         if i == 1:
             first_batch = curr_batch
 
@@ -259,6 +286,9 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
                                        caption="Model samples via ancestral sampling.")
             update_img = plot_update_energy(update_result=update_result,
                                             caption="Activation update energy curve (avg/min/max).")
+            caption_prefix = "Activation update energy curve for layer: "
+            layer_update_imgs = plot_layerwise_update_energy(update_result=update_result,
+                                                             caption=caption_prefix)
             # Plot mean L1 norms of the first PCNet parameters
             norm_info = dict()
             for i_layer, layer in enumerate(model._pcnets[0].layers):
@@ -271,7 +301,10 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
             wandb_dict = {f"iteration/{k}": v for k, v in wandb_dict.items()}
             wandb_dict["Current Image"] = curr_img
             wandb_dict["Generated Image"] = gen_img
-            wandb_dict["Update Energy Plot"] = update_img
+            wandb_dict["Energy/Free Energy Plot"] = update_img
+            for i_layer, layer_update_img in enumerate(layer_update_imgs):
+                wandb_dict[f"Energy/Negative Log Joint Plot (Layer {i_layer})"] = layer_update_img
+
             if not fast_mode:
                 wandb_dict["Initial Image"] = init_img
                 wandb_dict["Unseen Image"] = unseen_img

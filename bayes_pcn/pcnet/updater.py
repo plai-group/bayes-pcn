@@ -186,12 +186,12 @@ class AbstractVLBUpdater(AbstractUpdater):
 
     @abstractmethod
     def _build_proposal(self, log_joint_fn: Callable[[ActivationGroup, LayerLogProbStrat],
-                        torch.Tensor], a_group: ActivationGroup) -> BaseDistribution:
+                        LogProbResult], a_group: ActivationGroup) -> BaseDistribution:
         raise NotImplementedError()
 
     def _fit_sample_proposal(self, X_obs: torch.Tensor, n_samples: int, n_layers: int,
                              n_models: int, log_joint_fn:
-                             Callable[[ActivationGroup, LayerLogProbStrat], torch.Tensor],
+                             Callable[[ActivationGroup, LayerLogProbStrat], LogProbResult],
                              **kwargs) -> Tuple[List[ActivationGroup], torch.Tensor, List[Any]]:
         if n_layers == 1:
             samples = [self._activation_init_fn(X_obs=X_obs) for _ in range(n_samples)]
@@ -206,7 +206,7 @@ class AbstractVLBUpdater(AbstractUpdater):
         return samples, log_sample_weight, fit_info
 
     def _fit_proposal(self, log_joint_fn: Callable[[ActivationGroup, LayerLogProbStrat],
-                      torch.Tensor], X_obs: torch.Tensor
+                      LogProbResult], X_obs: torch.Tensor
                       ) -> Tuple[BaseDistribution, Dict[str, Any]]:
         a_group = self._activation_init_fn(X_obs=X_obs)
         # Update hidden layer while fixing obs layer
@@ -219,7 +219,7 @@ class AbstractVLBUpdater(AbstractUpdater):
         return proposal, {'layer_dims': a_group.dims, **fit_info}
 
     def _log_sample_weight_unnorm(self, a_groups: List[ActivationGroup], log_joint_fn:
-                                  Callable[[ActivationGroup, LayerLogProbStrat], torch.Tensor],
+                                  Callable[[ActivationGroup, LayerLogProbStrat], LogProbResult],
                                   proposal_fn: Callable[[ActivationGroup], torch.Tensor],
                                   **kwargs) -> torch.Tensor:
         """Returns an unnormalized sample log weight matrix of shape <d_batch x n_samples>.
@@ -238,7 +238,7 @@ class AbstractVLBUpdater(AbstractUpdater):
             for a_group in a_groups:
                 log_weights = []
                 for log_joint_fn in log_joint_fns:
-                    log_p = log_joint_fn(a_group, LayerLogProbStrat.P_PRED)
+                    log_p = log_joint_fn(a_group, LayerLogProbStrat.P_PRED).log_prob
                     log_q = proposal_fn(a_group)
                     model_log_weights = log_p - log_q
                     log_weights.append(model_log_weights)
@@ -256,7 +256,7 @@ class AbstractVLBUpdater(AbstractUpdater):
 
 class VLBModeUpdater(AbstractVLBUpdater):
     def _build_proposal(self, log_joint_fn: Callable[[ActivationGroup, LayerLogProbStrat],
-                        torch.Tensor], a_group: ActivationGroup) -> BaseDistribution:
+                        LogProbResult], a_group: ActivationGroup) -> BaseDistribution:
         # NOTE: Sampling from the mode is roughly sampling from normal with very high precision.
         mean_vectors = []
         for i in range(a_group.d_batch):
@@ -270,7 +270,7 @@ class VLBModeUpdater(AbstractVLBUpdater):
 
 class ReparamVIUpdater(AbstractVLBUpdater):
     def _build_proposal(self, log_joint_fn: Callable[[ActivationGroup, LayerLogProbStrat],
-                        torch.Tensor], a_group: ActivationGroup) -> BaseDistribution:
+                        LogProbResult], a_group: ActivationGroup) -> BaseDistribution:
         mean_vectors = []
         stdev_vectors = []
         X_obs = a_group.get_acts(layer_index=0, detach=True)
@@ -288,7 +288,7 @@ class ReparamVIUpdater(AbstractVLBUpdater):
 
 class VLBFullUpdater(AbstractVLBUpdater):
     def _fixed_input_log_joint_fn(self, log_joint_fn: Callable[[ActivationGroup, LayerLogProbStrat],
-                                  torch.Tensor], X_obs: torch.Tensor, original_dims: List[int]):
+                                  LogProbResult], X_obs: torch.Tensor, original_dims: List[int]):
         def fn(hidden: torch.Tensor):
             # fix all non parameter values and only accept parameter as input
             assert hidden.shape[0] == 1 and X_obs.shape[0] == 1
@@ -296,11 +296,11 @@ class VLBFullUpdater(AbstractVLBUpdater):
             activations = torch.cat((X_obs, hidden), dim=1)
             a_group = ActivationGroup.from_concatenated(activations=activations, dims=original_dims)
             a_group.device = original_device
-            return log_joint_fn(a_group)
+            return log_joint_fn(a_group).log_prob
         return fn
 
     def _build_proposal(self, log_joint_fn: Callable[[ActivationGroup, LayerLogProbStrat],
-                        torch.Tensor], a_group: ActivationGroup) -> BaseDistribution:
+                        LogProbResult], a_group: ActivationGroup) -> BaseDistribution:
         # FIXME: Right now, if Hessian is not invertible we just take the diagonal (refer to MVN)
         # NOTE: We must be close to convergence for the Hessian to be invertible
         mean_vectors = []
@@ -311,7 +311,7 @@ class VLBFullUpdater(AbstractVLBUpdater):
             mean_vector = a_group.get_datapoint(data_index=i, flatten=True)[:, a_group.dims[0]:]
             mean_vectors.append(mean_vector)
             fn = self._fixed_input_log_joint_fn(log_joint_fn=log_joint_fn, X_obs=X_obs[i:i+1],
-                                                original_dims=a_group.dims)
+                                                original_dims=a_group.dims).log_prob
             precision_matrix = - torch.autograd.functional.hessian(fn, mean_vector)
             precision_matrices.append(precision_matrix.squeeze())
         mean_vectors = torch.cat(mean_vectors, dim=0)

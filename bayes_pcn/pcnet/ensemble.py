@@ -171,12 +171,28 @@ class PCNetEnsemble:
         self._log_weights = update_result.log_weights
         return update_result
 
-    def log_joint(self, a_group: ActivationGroup,
-                  log_prob_strat: LayerLogProbStrat = None) -> torch.Tensor:
-        ljs = torch.stack([pcnet.log_joint(a_group=a_group, log_prob_strat=log_prob_strat)
-                           for pcnet in self._pcnets], dim=1)
-        weighted_ljs = ljs + self._log_weights.unsqueeze(0)
-        return torch.logsumexp(weighted_ljs, dim=-1)
+    def log_joint(self, a_group: ActivationGroup, log_prob_strat: LayerLogProbStrat = None,
+                  batch_independence: LayerLogProbStrat = False) -> LogProbResult:
+        """Return the joint log probability and the layerwise log probabilities of the
+        input activation group. If there are multiple pcnets, only return the layerwise
+        log probabilities of the last pcnet.
+
+        Args:
+            a_group (ActivationGroup): _description_
+            log_prob_strat (LayerLogProbStrat, optional): _description_. Defaults to None.
+
+        Returns:
+            LogProbResult: _description_
+        """
+        lps = []
+        for pcnet in self._pcnets:
+            lp_result = pcnet.log_joint(a_group=a_group, log_prob_strat=log_prob_strat,
+                                        batch_independence=batch_independence)
+            lps.append(lp_result.log_prob)
+        lps = torch.stack(lps, dim=1)
+        weighted_ljs = lps + self._log_weights.unsqueeze(0)
+        log_joint = torch.logsumexp(weighted_ljs, dim=-1)
+        return LogProbResult(log_prob=log_joint, layer_log_probs=lp_result.layer_log_probs)
 
     def rebind(self, X_obs: torch.Tensor, fixed_indices: torch.Tensor) -> UpdateResult:
         delete_result = self.delete(X_obs=X_obs, fixed_indices=fixed_indices)
@@ -211,7 +227,7 @@ class PCNetEnsemble:
         random.shuffle(info)
         data = torch.cat([sample_info[0] for sample_info in info], dim=0)
         a_group = ActivationGroup.merge(a_groups=[sample_info[1] for sample_info in info])
-        log_joint = self.log_joint(a_group=a_group)
+        log_joint = self.log_joint(a_group=a_group).log_prob
         return Sample(data=data, log_joint=log_joint)
 
     def _initialize_base_models(self, n_models: int, act_fn: ActFn, **kwargs) -> List[PCNet]:
