@@ -157,7 +157,7 @@ def plot_layerwise_update_energy(update_result: UpdateResult,
         ax_obj = ax[0, 0]
         ax_obj.set_title(f"Layer {i_layer}")
         x = [i for i in range(1, n_iter+1)]
-        y = [layerwise_mean_losses[i_iter][i_layer] for i_iter in range(n_iter)]
+        y = [layerwise_mean_losses[i_iter][i_layer].mean().item() for i_iter in range(n_iter)]
         ax_obj.plot(x, y, 'r-')
         fig.tight_layout()
         imgs.append(fig2img(fig=fig, caption=caption))

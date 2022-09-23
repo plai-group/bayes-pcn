@@ -7,8 +7,9 @@ import pyro
 import pyro.distributions as pdists
 
 from bayes_pcn.const import *
-from bayes_pcn.pcnet.util import dpfp, get_kernel_sigmas, is_PD, nearest_PD, kernel_log_prob,\
-                                 kernel_posterior_params, local_wta, normalize
+from bayes_pcn.pcnet.util import is_PD, nearest_PD
+from bayes_pcn.pcnet.kernels import get_kernel_sigmas, kernel_log_prob, kernel_posterior_params
+from .activations import local_wta, dpfp
 
 
 class AbstractPCLayer(ABC):
@@ -36,6 +37,8 @@ class AbstractPCLayer(ABC):
             self._bayes_update(X_obs=X_obs, **kwargs)
         elif self._update_strat == LayerUpdateStrat.KERNEL:
             self._kernel_update(X_obs=X_obs, **kwargs)
+        elif self._update_strat == LayerUpdateStrat.NOISING:
+            self._ml_update(X_obs=X_obs, **kwargs)
         else:
             raise NotImplementedError()
 
@@ -123,19 +126,24 @@ class PCLayer(AbstractPCLayer):
         self._act_fn = act_fn
         self._weight_lr = kwargs.get('weight_lr', None)
         self._bias = kwargs.get('bias', None)
+
         if self._act_fn == ActFn.DPFP:
             self._d_in = 2 * self._d_in
+
         if self._bias:
             self._d_in = self._d_in + 1
+
         if kwargs.get('scale_layer', False):
             self._layer_norm = torch.nn.LayerNorm(self._d_in, elementwise_affine=False)
         else:
             self._layer_norm = None  # normalize
 
-        # MatrixNormal prior mean matrix
-        # self._R = torch.empty(self._d_in, self._d_out)
-        # torch.nn.init.kaiming_normal_(self._R, nonlinearity='linear')
-        self._R = torch.zeros(self._d_in, self._d_out)
+        if kwargs.get('weight_init_strat') == WeightInitStrat.FIXED:
+            self._R = torch.zeros(self._d_in, self._d_out)
+        else:
+            self._R = torch.empty(self._d_in, self._d_out)
+            torch.nn.init.kaiming_normal_(self._R, nonlinearity='linear')
+
         self._R_original = deepcopy(self._R)
         # MatrixNormal prior row-wise covariance matrix (initially isotropic)
         self._U = torch.eye(self._d_in) * sigma_prior ** 2
@@ -271,6 +279,7 @@ class PCLayer(AbstractPCLayer):
         error = self._error(X_obs=X_obs, X_in=X_in)
         grad = self._f(X_in).T.matmul(error) / self._Sigma
         weight_lr = kwargs.get('lr', self._weight_lr)
+        # print(grad.max())
         self._R = self._R + weight_lr / d_batch * grad
 
     def _bayes_update(self, X_obs: torch.Tensor, X_in: torch.Tensor) -> None:
@@ -364,9 +373,12 @@ class PCTopLayer(AbstractPCLayer):
         self._weight_lr = kwargs.get('weight_lr', None)
 
         # Normal prior mean vector
-        # self._R = torch.empty(d_out)
-        # torch.nn.init.normal_(self._R, 0, d_out**-0.5)
-        self._R = torch.zeros(d_out)
+        if kwargs.get('weight_init_strat') == WeightInitStrat.FIXED:
+            self._R = torch.zeros(d_out)
+        else:
+            self._R = torch.empty(d_out)
+            torch.nn.init.normal_(self._R, 0, d_out**-0.5)
+
         if kwargs.get('economy_mode', False):
             # HACK: Makes MHN memory efficient
             self._U = torch.eye(1) * sigma_prior ** 2

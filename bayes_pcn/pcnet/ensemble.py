@@ -1,9 +1,12 @@
+from copy import deepcopy
 import random
 import torch
 from typing import List
 
-from bayes_pcn.const import *
+from ..const import *
+from .activations import *
 from .pcnet import PCNet
+from .structs import *
 from .updater import *
 from .util import *
 
@@ -12,7 +15,7 @@ class PCNetEnsemble:
     def __init__(self, n_models: int, n_layers: int, x_dim: int, h_dim: int, act_fn: ActFn,
                  infer_T: int, infer_lr: float, sigma_prior: float, sigma_obs: float,
                  sigma_data: float, activation_optim: str, n_proposal_samples: int,
-                 activation_init_strat: str, layer_log_prob_strat: str,
+                 activation_init_strat: str, weight_init_strat: str, layer_log_prob_strat: str,
                  layer_sample_strat: str, layer_update_strat: str, ensemble_log_joint_strat: str,
                  ensemble_proposal_strat: str, scale_layer: bool, **kwargs) -> None:
         self._n_models: int = n_models
@@ -31,8 +34,10 @@ class PCNetEnsemble:
         self._n_elbo_particles = kwargs.get('n_elbo_particles')
         act_fn = ActFn.get_enum_from_value(act_fn)
         kernel_type = Kernel.get_enum_from_value(kwargs.get('kernel_type'))
+        self.weight_init_strat = WeightInitStrat.get_enum_from_value(weight_init_strat)
 
-        base_models_init_args = dict(n_models=n_models, act_fn=act_fn, bias=kwargs.get('bias'),
+        base_models_init_args = dict(weight_init_strat=self.weight_init_strat, act_fn=act_fn,
+                                     n_models=n_models, bias=kwargs.get('bias'),
                                      kernel_type=kernel_type)
         if LayerUpdateStrat.get_enum_from_value(layer_update_strat) == LayerUpdateStrat.MHN:
             # HACK: Makes MHN memory efficient
@@ -40,6 +45,7 @@ class PCNetEnsemble:
         self._pcnets: List[PCNet] = self._initialize_base_models(**base_models_init_args)
 
         self.activation_init_strat = ActInitStrat.get_enum_from_value(activation_init_strat)
+        self.weight_init_strat = WeightInitStrat.get_enum_from_value(weight_init_strat)
         self.layer_log_prob_strat = LayerLogProbStrat.get_enum_from_value(layer_log_prob_strat)
         self.layer_sample_strat = LayerSampleStrat.get_enum_from_value(layer_sample_strat)
         self.layer_update_strat = LayerUpdateStrat.get_enum_from_value(layer_update_strat)
@@ -76,6 +82,11 @@ class PCNetEnsemble:
             metric = MHNMetric.get_enum_from_value(kwargs.get('mhn_metric', MHNMetric.DOT.value))
             update_fn_args = dict(pcnet_template=deepcopy(self._pcnets[0]), metric=metric)
             self._updater = MHNUpdater(**update_fn_args)
+        elif self.layer_update_strat == LayerUpdateStrat.NOISING:
+            assert self.layer_log_prob_strat == LayerLogProbStrat.MAP
+            update_fn_args['weight_lr'] = kwargs.get('weight_lr', None)
+            update_fn_args['beta_noise'] = kwargs.get('beta_noise', None)
+            self._updater = NoisingMLUpdater(**update_fn_args)
         else:
             raise NotImplementedError()
 

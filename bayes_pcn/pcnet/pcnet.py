@@ -1,9 +1,11 @@
+import pyro
 import torch
 from typing import List, Tuple
 
 from bayes_pcn.const import *
-from .a_group import ActivationGroup
-from .layers import *
+from .activations import ActivationGroup
+from .layers import AbstractPCLayer, PCLayer, PCTopLayer
+from .structs import *
 from .util import *
 
 
@@ -63,7 +65,8 @@ class PCNet:
                 log_prob_args['log_prob_strat'] = log_prob_strat
             layer_log_probs.append(layer.log_prob(**log_prob_args))
         result = sum(layer_log_probs)
-        return LogProbResult(log_prob=result, layer_log_probs=[lp.item() for lp in layer_log_probs])
+        return LogProbResult(log_prob=result,
+                             layer_log_probs=[lp.detach() for lp in layer_log_probs])
 
     def update_weights(self, a_group: ActivationGroup, **kwargs) -> None:
         """Update all layer weights according to self._layer_update_strat given

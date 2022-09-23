@@ -123,7 +123,7 @@ def main():
     wandb.define_metric("epoch/*", step_metric="epoch/z_step")
     wandb.run.name = f"{loaded_args.run_name}_d{loaded_args.n_data}"
     setup(args=loaded_args)
-    learn_loaders, score_loaders, dataset_info = dataset_dispatcher(args=loaded_args)
+    _, score_loaders, _ = dataset_dispatcher(args=loaded_args)
     loaders = score_loaders  # if args.fast_mode else learn_loaders
     train_loader, test_loaders = separate_train_test(loaders=loaders)
 

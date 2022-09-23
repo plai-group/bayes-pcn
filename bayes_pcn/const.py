@@ -24,10 +24,11 @@ class LayerSampleStrat(ArgParseEnum):
 
 
 class LayerUpdateStrat(ArgParseEnum):
-    ML = 'ml'          # Gradient descent update on weights given activations
-    BAYES = 'bayes'    # Conjugate Bayesian update on weights given activations
-    MHN = 'mhn'        # Create a new PCNet model per observation
-    KERNEL = 'kernel'  # Gaussian process "weight update" given activations
+    ML = 'ml'            # Gradient descent update on weights given activations
+    BAYES = 'bayes'      # Conjugate Bayesian update on weights given activations
+    MHN = 'mhn'          # Create a new PCNet model per observation
+    KERNEL = 'kernel'    # Gaussian process "weight update" given activations
+    NOISING = 'noising'  # Use diffusion variational distribution
 
 
 class EnsembleLogJointStrat(ArgParseEnum):
@@ -51,6 +52,11 @@ class ActInitStrat(ArgParseEnum):
     RANDN = 'randn'          # Initialize hidden activation values to kaiming normal samples
     SAMPLE = 'sample'        # Initialize hidden activation values to model samples
     RANDNPLUS = 'randnplus'  # Initialize hidden activation values to truncated kaiming normal
+
+
+class WeightInitStrat(ArgParseEnum):
+    FIXED = 'fixed'  # Initialize hidden activation values to zeroes
+    RANDN = 'randn'  # Initialize network weight means to kaiming normal samples
 
 
 class ActFn(ArgParseEnum):
