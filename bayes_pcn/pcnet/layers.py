@@ -408,7 +408,7 @@ class PCTopLayer(AbstractPCLayer):
             marginal_Sigma = self._Sigma
         elif log_prob_strat == LayerLogProbStrat.P_PRED:
             marginal_Sigma = self._Sigma + self._U[0, 0]
-            if d_batch > 1 and not kwargs.get('batch_independence', False):
+            if d_batch > 1 and not kwargs.get('batch_independence', True):
                 dist = dists.Normal(marginal_mean, marginal_Sigma ** 0.5)
                 return dist.log_prob(X_obs).sum().unsqueeze(-1)
         else:

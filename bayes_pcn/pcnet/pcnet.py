@@ -46,7 +46,7 @@ class PCNet:
         return result, ActivationGroup(activations=traces[::-1], no_param=True)
 
     def log_joint(self, a_group: ActivationGroup, log_prob_strat: LayerLogProbStrat = None,
-                  batch_independence: LayerLogProbStrat = False) -> LogProbResult:
+                  batch_independence: bool = False) -> LogProbResult:
         """Return log joint of network layer activations.
 
         Args:

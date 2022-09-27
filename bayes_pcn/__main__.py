@@ -10,7 +10,7 @@ from bayes_pcn.const import *
 from .dataset import dataset_dispatcher, separate_train_test
 from .util import DotDict, save_config, load_config, save_result, setup
 from .pcnet import PCNetEnsemble
-from .trainer import train_epoch, score_epoch
+from .trainer import train_epoch, score_epoch, model_dispatcher
 
 
 def get_parser() -> argparse.ArgumentParser:
@@ -102,26 +102,6 @@ def get_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def model_dispatcher(args: Dict[str, Any], dataset_info: Dict[str, Any]) -> PCNetEnsemble:
-    return PCNetEnsemble(n_models=args.n_models, n_layers=args.n_layers, h_dim=args.h_dim,
-                         x_dim=dataset_info.get('x_dim'), act_fn=args.act_fn, infer_T=args.T_infer,
-                         infer_lr=args.activation_lr, sigma_prior=args.sigma_prior,
-                         sigma_obs=args.sigma_obs, sigma_data=args.sigma_data,
-                         n_proposal_samples=args.n_proposal_samples,
-                         activation_optim=args.activation_optim,
-                         activation_init_strat=args.activation_init_strat,
-                         weight_init_strat=args.weight_init_strat,
-                         layer_log_prob_strat=args.layer_log_prob_strat,
-                         layer_sample_strat=args.layer_sample_strat,
-                         layer_update_strat=args.layer_update_strat,
-                         ensemble_log_joint_strat=args.ensemble_log_joint_strat,
-                         ensemble_proposal_strat=args.ensemble_proposal_strat,
-                         scale_layer=args.scale_layer, resample=args.resample,
-                         weight_lr=args.weight_lr, beta_forget=args.beta_forget,
-                         beta_noise=args.beta_noise, mhn_metric=args.mhn_metric, bias=args.bias,
-                         n_elbo_particles=args.n_elbo_particles, kernel_type=args.kernel_type)
-
-
 def run(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, DataLoader],
         config: Tuple[PCNetEnsemble, Dict[str, Any]]) -> Dict[str, Any]:
     model, args = config
@@ -162,6 +142,8 @@ def run(learn_loaders: Dict[str, DataLoader], score_loaders: Dict[str, DataLoade
                 if "_acc" in key and score > best_score:
                     best_scores_dict[key] = score
                     save_config(config, f"{args.path}/{name}.pt")
+            if e % max(args.n_epoch // 4, 1) == 0:
+                save_config(config, f'{args.path}/model_{e}.pt')
         save_config(config, f'{args.path}/latest.pt')
     return results_dict
 

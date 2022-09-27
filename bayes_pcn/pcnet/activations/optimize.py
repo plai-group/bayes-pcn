@@ -6,7 +6,8 @@ from bayes_pcn.pcnet.util import fixed_indices_exists
 
 
 def estimate_free_energy(log_joint_fn: Callable[[ActivationGroup], LogProbResult],
-                         a_group: ActivationGroup, n_particles: int = 1) -> LogProbResult:
+                         a_group: ActivationGroup, n_particles: int = 1,
+                         train_mode: bool = False) -> LogProbResult:
     """Returns the free energy vector associated with the input ActivationGroup.
     If a_group.stochastic is true, assume a normal variational distribution.
     Otherwise, assume a Dirac delta variational distribution.
@@ -22,7 +23,7 @@ def estimate_free_energy(log_joint_fn: Callable[[ActivationGroup], LogProbResult
         LogProbResult: An object containing each datapoint's total and layerwise free energy.
     """
     if not a_group.stochastic:
-        lp_result = log_joint_fn(a_group)
+        lp_result = log_joint_fn(a_group=a_group, batch_independence=not train_mode)
         return LogProbResult(log_prob=-lp_result.log_prob,
                              layer_log_probs=[-lp for lp in lp_result.layer_log_probs])
 
@@ -33,23 +34,9 @@ def estimate_free_energy(log_joint_fn: Callable[[ActivationGroup], LogProbResult
             layer_acts_p = layer_acts + layer_stdevs * torch.randn_like(layer_stdevs)
             activations.append(layer_acts_p)
         a_group_p = ActivationGroup(activations=activations, no_param=True, stochastic=False)
-        lp_result = log_joint_fn(a_group_p)
+        lp_result = log_joint_fn(a_group=a_group_p, batch_independence=not train_mode)
         energy -= lp_result.log_prob / n_particles
 
-    # batch_entropies = [0.] * len(activations[0])
-    # layer_entropies = [0.] * len(a_group.stdevs)
-    # for i_layer, layer_stdevs in enumerate(a_group.stdevs):
-    #     for i_batch in range(len(batch_entropies)):
-    #         entropy_li = 0.5*torch.logdet((2*torch.pi*torch.e*layer_stdevs[i_batch]).diag())
-    #         batch_entropies[i_batch] += entropy_li
-    #         layer_entropies[i_layer] += entropy_li
-    # entropy = torch.tensor(batch_entropies).to(energy.device)
-
-    # elbo = entropy - energy
-    # layer_log_joints = torch.tensor([-lp for lp in lp_result.layer_log_probs])
-    # layer_entropies = torch.tensor(layer_entropies)
-    # layer_elbos = layer_entropies - layer_log_joints
-    # return LogProbResult(log_prob=-elbo, layer_log_probs=layer_elbos.tolist())
     batch_entropies = [0.] * len(activations[0])
     for layer_stdevs in a_group.stdevs:
         for i_batch in range(len(batch_entropies)):
@@ -59,14 +46,14 @@ def estimate_free_energy(log_joint_fn: Callable[[ActivationGroup], LogProbResult
 
     elbo = entropy - energy
     layer_log_joints = [-lp for lp in lp_result.layer_log_probs]
-    # print(layer_log_joints[0])
     return LogProbResult(log_prob=-elbo, layer_log_probs=layer_log_joints)
 
 
 def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], LogProbResult],
                        a_group: ActivationGroup, infer_T: int, infer_lr: float,
                        activation_optim: str, fixed_indices: torch.Tensor = None,
-                       n_particles: int = 1, **kwargs) -> Dict[str, List[float]]:
+                       n_particles: int = 1, train_mode: bool = False, **kwargs
+                       ) -> Dict[str, List[float]]:
     """Move in the space of activation vectors to minimize log joint under the model.
     a_group is modified in place. To clarify, the model is defined by its log_joint_fn.
     Depending on what part of a_group is 'clamped' or not updated by gradient descent,
@@ -107,7 +94,7 @@ def maximize_log_joint(log_joint_fn: Callable[[ActivationGroup], LogProbResult],
 
     for _ in range(infer_T):
         result = estimate_free_energy(log_joint_fn=log_joint_fn, a_group=a_group,
-                                      n_particles=n_particles)
+                                      n_particles=n_particles, train_mode=train_mode)
         free_energy = result.log_prob
         loss = free_energy.sum(dim=0)
 

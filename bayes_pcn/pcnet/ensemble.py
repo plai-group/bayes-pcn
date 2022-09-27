@@ -90,38 +90,41 @@ class PCNetEnsemble:
         else:
             raise NotImplementedError()
 
-    def delete(self, X_obs: torch.Tensor, fixed_indices: torch.Tensor = None) -> None:
-        """Delete an observation from the memory. NOTE: Numerically unstable at the moment.
+    def forget(self, beta_forget: float = None) -> None:
+        """Apply forget operation to each model in the ensemble.
 
         Args:
-            X_obs (torch.Tensor): Observation to delete.
-            fixed_indices (torch.Tensor, optional): Matrix of shape <d_batch x x_dim> that denotes
-                which data-specific indices to prevent modification when predicting.
+            beta_forget (float, optional): Forget strength. Higher is more. Defaults to None.
         """
-        X_obs = X_obs.to(self.device)
-        if fixed_indices_exists(fixed_indices=fixed_indices):
-            fixed_indices = fixed_indices.to(self.device)
-        a_group = self.initialize_activation_group(X_obs=X_obs)
-
-        # Update hidden layer while fixing obs layer
-        a_group.clamp(obs=True, hidden=False)
-        maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
-                           infer_lr=self._infer_lr, infer_T=self._infer_T,
-                           fixed_indices=fixed_indices, activation_optim=self._activation_optim)
-        for pcnet in self._pcnets:
-            pcnet.delete_from_weights(a_group=a_group)
-
-    def forget(self, beta_forget: float = None) -> None:
         for pcnet in self._pcnets:
             pcnet.forget(beta_forget=self._beta_forget if beta_forget is None else beta_forget)
 
     def infer(self, X_obs: torch.Tensor, fixed_indices: torch.Tensor = None,
               n_repeat: int = 1) -> Prediction:
+        """Perform memory recall using X_obs as the input.
+
+        Args:
+            X_obs (torch.Tensor): Data matrix of shape <d_batch x x_dim>.
+            fixed_indices (torch.Tensor, optional): A boolean matrix detailing which elements of
+                                                   X_obs to not modify during recall. Its shape
+                                                   should be <d_batch x x_dim>. If None, assuming
+                                                   all elements can be changed.
+            n_repeat (int, optional): How many times to perform ICM. Typically, the higher this is
+                                    the better the recall result will be at the cost of additional
+                                    computation. Defaults to 1.
+
+        Returns:
+            Prediction: A struct containing the recall result and other miscellaneous info.
+        """
         original_device = X_obs.device
         X_obs = X_obs.to(self.device)
-        if fixed_indices_exists(fixed_indices=fixed_indices):
-            fixed_indices = fixed_indices.to(self.device)
         a_group = self.initialize_activation_group(X_obs=X_obs)
+        is_heteroassociative = fixed_indices_exists(fixed_indices=fixed_indices)
+        if is_heteroassociative:
+            fixed_indices = fixed_indices.to(self.device)
+            infer_T, n_repeat = n_repeat * self._infer_T, 1
+        else:
+            infer_T = self._infer_T
 
         infer_info = dict()
         for n in range(1, n_repeat+1):
@@ -132,17 +135,15 @@ class PCNetEnsemble:
             if self._n_layers > 1:
                 a_group.clamp(obs=True, hidden=False)
                 hidden_info = maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
-                                                 infer_lr=self._infer_lr,
-                                                 infer_T=self._infer_T,
+                                                 infer_lr=self._infer_lr, infer_T=infer_T,
                                                  fixed_indices=fixed_indices,
                                                  activation_optim=self._activation_optim,
                                                  n_particles=self._n_elbo_particles)
             # Update obs layer while fixing hidden layers
-            if self._n_layers == 1 or not fixed_indices_exists(fixed_indices=fixed_indices):
+            if self._n_layers == 1 or not is_heteroassociative:
                 a_group.clamp(obs=False, hidden=True)
                 obs_info = maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
-                                              infer_lr=self._infer_lr,
-                                              infer_T=self._infer_T,
+                                              infer_lr=self._infer_lr, infer_T=infer_T,
                                               fixed_indices=fixed_indices,
                                               activation_optim=self._activation_optim)
             infer_info[f"repeat_{n}"] = {'hidden': hidden_info, 'obs': obs_info}
@@ -153,6 +154,18 @@ class PCNetEnsemble:
         return Prediction(data=X_pred, a_group=a_group, info=infer_info)
 
     def initialize_activation_group(self, X_obs: torch.Tensor) -> ActivationGroup:
+        """Given observations, construct an ActivationGroup object.
+
+        Args:
+            X_obs (torch.Tensor): A matrix of shape <d_batch x x_dim>
+
+        Raises:
+            NotImplementedError: _description_
+
+        Returns:
+            ActivationGroup: An object containing appropriate latent neuron activation vectors
+                            corresponding to each entry in X_obs.
+        """
         d_batch = X_obs.shape[0]
         activations = [X_obs]
         if self.activation_init_strat == ActInitStrat.FIXED:
@@ -175,6 +188,14 @@ class PCNetEnsemble:
         return ActivationGroup(activations=activations, stochastic=use_activations_stdevs)
 
     def learn(self, X_obs: torch.Tensor) -> UpdateResult:
+        """Update memory content with X_obs.
+
+        Args:
+            X_obs (torch.Tensor): Datapoints to memorize of shape <d_batch x x_dim>.
+
+        Returns:
+            UpdateResult: A struct containing updated models, weights, and other info.
+        """
         X_obs = X_obs.to(self.device)
         updater_args = dict(X_obs=X_obs, pcnets=self._pcnets, log_weights=self._log_weights)
         update_result = self._updater(**updater_args)
@@ -183,7 +204,7 @@ class PCNetEnsemble:
         return update_result
 
     def log_joint(self, a_group: ActivationGroup, log_prob_strat: LayerLogProbStrat = None,
-                  batch_independence: LayerLogProbStrat = False) -> LogProbResult:
+                  batch_independence: bool = False) -> LogProbResult:
         """Return the joint log probability and the layerwise log probabilities of the
         input activation group. If there are multiple pcnets, only return the layerwise
         log probabilities of the last pcnet.
@@ -205,12 +226,6 @@ class PCNetEnsemble:
         log_joint = torch.logsumexp(weighted_ljs, dim=-1)
         return LogProbResult(log_prob=log_joint, layer_log_probs=lp_result.layer_log_probs)
 
-    def rebind(self, X_obs: torch.Tensor, fixed_indices: torch.Tensor) -> UpdateResult:
-        delete_result = self.delete(X_obs=X_obs, fixed_indices=fixed_indices)
-        learn_result = self.learn(X_obs=X_obs)
-        rebind_info = dict(delete=delete_result, learn=learn_result)
-        return UpdateResult(pcnets=None, log_weights=None, info=rebind_info)
-
     def sample(self, d_batch: int = 1, a_group: ActivationGroup = None,
                X_top: torch.Tensor = None) -> Sample:
         """Select a base model based on its importance weight and sample from that model.
@@ -222,7 +237,7 @@ class PCNetEnsemble:
                                             layer of a hierarchical network. Defaults to None.
 
         Returns:
-            (Sample): Sample object with <d_batch x x_dim> data and <d_batch> log joint tensors.
+            Sample: Sample object with <d_batch x x_dim> data and <d_batch> log joint tensors.
         """
         info = []
         weights = (self._log_weights - self._log_weights.logsumexp(dim=0)).exp()

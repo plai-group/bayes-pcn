@@ -33,7 +33,7 @@ class MLUpdater(AbstractUpdater):
             a_group.clamp(obs=True, hidden=False)
             fit_info = maximize_log_joint(log_joint_fn=pcnet.log_joint, a_group=a_group,
                                           infer_T=self._infer_T, infer_lr=self._infer_lr,
-                                          activation_optim=self._activation_optim)
+                                          activation_optim=self._activation_optim, train_mode=True)
             pcnet.update_weights(a_group=a_group, lr=kwargs.get('weight_lr', self._weight_lr))
             info[f"model_{i}"] = fit_info
         return UpdateResult(pcnets=new_pcnets, log_weights=log_weights, info=info)

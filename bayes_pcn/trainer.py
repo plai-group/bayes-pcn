@@ -1,38 +1,13 @@
-import math
-from matplotlib import pyplot as plt
 import pandas as pd
 import torch
-import torchvision
 from torch.utils.data import DataLoader
-from typing import Dict, List, Tuple
+from typing import Any, Dict, Tuple
 import wandb
 
 from bayes_pcn.pcnet.util import fixed_indices_exists
 
-from .pcnet import PCNetEnsemble, DataBatch, UpdateResult
-from .util import DotDict, fig2img, save_config, unnormalize
-
-
-def get_next_data_batch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader]) -> DataBatch:
-    """Given train and test loaders that are iterators, return a DataBatch object.
-    NOTE: Do not call next() on dataloaders outside this method!
-
-    Args:
-        train_loader (DataLoader): Single train dataloader.
-        test_loaders (Dict[str, DataLoader]): A dictionary of test dataloaders.
-
-    Returns:
-        DataBatch: A DataBatch object with reshaped versions of the next iterator datapoints.
-    """
-    X, _ = next(train_loader)
-    X_shape = X.shape  # original data shape
-    X = X.reshape(X_shape[0], -1)
-    test_batch = {}
-    for name, test_loader in test_loaders.items():
-        X_test, fixed_indices = next(test_loader)
-        test_batch[name] = (X_test.reshape(X_test.shape[0], -1),
-                            fixed_indices.reshape(fixed_indices.shape[0], -1))
-    return DataBatch(train=(X, None), tests=test_batch, original_shape=X_shape)
+from .pcnet import PCNetEnsemble, DataBatch
+from .util import *
 
 
 def score_data_batch(data_batch: DataBatch, model: PCNetEnsemble, acc_thresh: float,
@@ -81,98 +56,6 @@ def score_data_batch(data_batch: DataBatch, model: PCNetEnsemble, acc_thresh: fl
                                   train_pred=(train_result.data, None), tests_pred=tests_pred,
                                   original_shape=data_batch.original_shape, info=batch_info)
     return result, result_data_batch
-
-
-def plot_data_batch(data_batch: DataBatch, caption: str = None) -> wandb.Image:
-    """Plot the first image in the batch under various transformations.
-
-    Args:
-        data_batch (DataBatch): _description_
-        caption (str, optional): _description_. Defaults to None.
-
-    Returns:
-        wandb.Image: _description_
-    """
-    rows = [None] * (1 + len(data_batch.tests)) * 2
-    X_shape = data_batch.original_shape
-    rows[0] = data_batch.train[0][:1].reshape(X_shape[1:])
-    rows[len(rows)//2] = data_batch.train_pred[0][:1].reshape(X_shape[1:])
-    for i, (X, X_pred) in enumerate(zip(data_batch.tests.values(), data_batch.tests_pred.values())):
-        rows[i+1] = X[0][:1].reshape(X_shape[1:])
-        rows[len(rows)//2+i+1] = X_pred[0][:1].reshape(X_shape[1:])
-    img = unnormalize(torchvision.utils.make_grid(rows, nrow=len(rows)//2))
-    return wandb.Image(img, caption=caption)
-
-
-def plot_update_energy(update_result: UpdateResult, caption: str = None) -> wandb.Image:
-    """Plot the min, max, and mean energy trajectory of a batch, averaged across models.
-
-    Args:
-        update_result (UpdateResult): Update result from model.learn.
-
-    Returns:
-        wandb.Image: Weights and Biases image detailing the plot.
-    """
-    update_info, model_names = update_result.info, []
-    all_mean_losses, all_min_losses, all_max_losses = [], [], []
-    for model_name, model_fit_info in update_info.items():
-        model_names.append(model_name)
-        all_mean_losses.append(model_fit_info.get('mean_losses', []))
-        all_min_losses.append(model_fit_info.get('min_losses', []))
-        all_max_losses.append(model_fit_info.get('max_losses', []))
-    ncols = min(4, len(update_info))
-    nrows = math.ceil(len(update_info)/ncols)
-    fig, ax = plt.subplots(ncols=ncols, nrows=nrows, squeeze=False, sharex=True, sharey=True)
-    for i in range(len(update_info)):
-        ax_obj = ax[i // ncols, i % ncols]
-        ax_obj.set_title(f"{model_names[i]}")
-        x = [i for i in range(1, len(all_mean_losses[i]) + 1)]
-        ax_obj.plot(x, all_mean_losses[i], 'b-')
-        ax_obj.plot(x, all_min_losses[i], 'b--')
-        ax_obj.plot(x, all_max_losses[i], 'b--')
-    fig.tight_layout()
-    img = fig2img(fig=fig, caption=caption)
-    plt.close(fig)
-    return img
-
-
-def plot_layerwise_update_energy(update_result: UpdateResult,
-                                 caption: str = None) -> List[wandb.Image]:
-    """Plot the layerwise loss trajectory of a batch.
-
-    Args:
-        update_result (UpdateResult): Update result from model.learn.
-
-    Returns:
-        List[wandb.Image]: A list of Weights and Biases images detailing the plot.
-    """
-    update_info = update_result.info
-    layerwise_mean_losses = update_info[list(update_info.keys())[0]]['layerwise_mean_losses']
-    n_iter, n_layer = len(layerwise_mean_losses), len(layerwise_mean_losses[0])
-
-    imgs = []
-    for i_layer in range(n_layer):
-        fig = plt.plot()
-        fig, ax = plt.subplots(ncols=1, nrows=1, squeeze=False, sharex=True, sharey=True)
-        ax_obj = ax[0, 0]
-        ax_obj.set_title(f"Layer {i_layer}")
-        x = [i for i in range(1, n_iter+1)]
-        y = [layerwise_mean_losses[i_iter][i_layer].mean().item() for i_iter in range(n_iter)]
-        ax_obj.plot(x, y, 'r-')
-        fig.tight_layout()
-        imgs.append(fig2img(fig=fig, caption=caption))
-        plt.close(fig)
-    return imgs
-
-
-def generate_samples(model: PCNetEnsemble, X_shape: torch.Size, d_batch: int,
-                     caption: str = None, X_top: torch.Tensor = None) -> wandb.Image:
-    sample_obj = model.sample(d_batch=d_batch, X_top=X_top)
-    X_gen, log_joint = sample_obj.data, [round(lj, 3) for lj in sample_obj.log_joint.tolist()]
-    img = torchvision.utils.make_grid(X_gen.reshape(-1, *X_shape[1:]), nrow=min(d_batch, 4))
-    log_joint_msg = f"Sample Weights: {log_joint}"
-    caption = log_joint_msg if caption is None else caption + "\n" + log_joint_msg
-    return wandb.Image(unnormalize(img), caption=caption)
 
 
 def score(X_pred: torch.Tensor, X_truth: torch.Tensor, acc_thresh: float,
@@ -337,3 +220,23 @@ def score_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
         wandb_dict[f"{key}/max"] = val
     wandb.log({f"epoch/{k}": v for k, v in wandb_dict.items()})
     return wandb_dict
+
+
+def model_dispatcher(args: Dict[str, Any], dataset_info: Dict[str, Any]) -> PCNetEnsemble:
+    return PCNetEnsemble(n_models=args.n_models, n_layers=args.n_layers, h_dim=args.h_dim,
+                         x_dim=dataset_info.get('x_dim'), act_fn=args.act_fn, infer_T=args.T_infer,
+                         infer_lr=args.activation_lr, sigma_prior=args.sigma_prior,
+                         sigma_obs=args.sigma_obs, sigma_data=args.sigma_data,
+                         n_proposal_samples=args.n_proposal_samples,
+                         activation_optim=args.activation_optim,
+                         activation_init_strat=args.activation_init_strat,
+                         weight_init_strat=args.weight_init_strat,
+                         layer_log_prob_strat=args.layer_log_prob_strat,
+                         layer_sample_strat=args.layer_sample_strat,
+                         layer_update_strat=args.layer_update_strat,
+                         ensemble_log_joint_strat=args.ensemble_log_joint_strat,
+                         ensemble_proposal_strat=args.ensemble_proposal_strat,
+                         scale_layer=args.scale_layer, resample=args.resample,
+                         weight_lr=args.weight_lr, beta_forget=args.beta_forget,
+                         beta_noise=args.beta_noise, mhn_metric=args.mhn_metric, bias=args.bias,
+                         n_elbo_particles=args.n_elbo_particles, kernel_type=args.kernel_type)

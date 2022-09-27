@@ -1,23 +1,19 @@
-project: "bayes-pcn-noising"
+project: "bayes-pcn-ml"
 program: -mbayes_pcn
 method: grid
 parameters:
-  beta-noise:
-    values: [0.1, 0.2]
+  h-dim:
+    values: [256, 512, 1024]
   act-fn:
     values: ["relu", "gelu"]
-  weight-lr:
-    values: [0.00001, 0.000001]
   n-data:
-    values: [128, 1024]
-  h-dim:
-    value: 3072
-  n-layers:
-    value: 10
+    values: [128, 256, 512, 1024]
   seed:
-    value: 0
+    values: [0, 1, 2]
+  n-layers:
+    value: 4
   n-epoch:
-    value: 5000
+    value: 4000
   sigma-prior:
     value: 1.
   sigma-obs:
@@ -27,24 +23,26 @@ parameters:
   layer-log-prob-strat:
     value: "map"
   run-group:
-    value: "sweep-ml-cifar-s12"
+    value: "camera-ml-cifar"
   wandb-mode:
     value: "online"
   activation-lr:
-    value: 0.001
+    value: 0.01
+  weight-lr:
+    value: 0.0001
   layer-sample-strat:
     value: "map"
   layer-update-strat:
-    value: "noising"
+    value: "ml"
   dataset:
     value: "cifar10"
   dataset-mode:
-    value: "mix"
+    value: "all"
   T-infer:
-    value: 1000
+    value: 500
   n-models:
     value: 1
   log-every-epoch:
-    value: 25
+    value: 100
   log-every:
     value: 2

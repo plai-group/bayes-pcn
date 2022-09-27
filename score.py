@@ -9,9 +9,8 @@ import wandb
 from bayes_pcn.const import LayerUpdateStrat
 from bayes_pcn.dataset import dataset_dispatcher, separate_train_test
 from bayes_pcn.pcnet import PCNetEnsemble
-from bayes_pcn.trainer import get_next_data_batch, plot_data_batch,\
-                              score_data_batch, generate_samples
-from bayes_pcn.util import load_config, save_result, setup
+from bayes_pcn.trainer import score_data_batch
+from bayes_pcn.util import *
 
 
 """
@@ -26,6 +25,8 @@ Usage: `python score.py --model-path=...`
 
 def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
+    parser.add_argument('--wandb-account', type=str, default="jasonyoo",
+                        help='Weights and Biases account ID.')
     parser.add_argument('--model-path', type=str, default='runs/debug/default/latest.pt')
     parser.add_argument('--dataset-mode', type=str, default='all',
                         choices=['fast', 'mix', 'mix_high', 'white', 'drop', 'mask', 'all'],
@@ -59,6 +60,10 @@ def score_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
             wandb_dict = {"z_step": i, **result}
             wandb_dict = {f"iteration/{k}": v for k, v in wandb_dict.items()}
             wandb_dict["Recalled Image"] = recall_img
+
+            # Log test dataset free energy trajectories
+            trajectory_img_dict = plot_test_trajectories(data_batch=pred_batch)
+            wandb_dict.update({f"Energy/{k}": v for k, v in trajectory_img_dict.items()})
             wandb.log(wandb_dict)
         scores.append(result)
 
@@ -116,7 +121,7 @@ def main():
         loaded_args.n_batch = loaded_n_batch
         loaded_args.n_batch_score = loaded_n_batch_score
 
-    wandb.init(project="bayes-pcn-score", entity="jasonyoo", config=loaded_args)
+    wandb.init(project="bayes-pcn-score", entity=args.wandb_account, config=loaded_args)
     wandb.define_metric("iteration/z_step")
     wandb.define_metric("iteration/*", step_metric="iteration/z_step")
     wandb.define_metric("epoch/z_step")

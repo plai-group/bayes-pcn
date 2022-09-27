@@ -151,7 +151,7 @@ class AbstractVLBUpdater(AbstractUpdater):
         fit_info = maximize_log_joint(log_joint_fn=log_joint_fn, a_group=a_group,
                                       infer_T=self._infer_T, infer_lr=self._infer_lr,
                                       activation_optim=self._activation_optim,
-                                      n_particles=self._n_elbo_particles)
+                                      n_particles=self._n_elbo_particles, train_mode=True)
         proposal = self._build_proposal(log_joint_fn=log_joint_fn, a_group=a_group)
         return proposal, {'layer_dims': a_group.dims, **fit_info}
 
