@@ -1,0 +1,46 @@
+project: "bayes-pcn-seq"
+program: -mbayes_pcn
+method: grid
+parameters:
+  sigma-prior:
+    values: [0.5, 1., 5.]
+  sigma-obs:
+    values: [0.005, 0.01, 0.05]
+  seed:
+    values: [0, 1, 2]
+  h-dim:
+    value: 1024
+  act-fn:
+    value: "gelu"
+  n-layers:
+    value: 4
+  n-models:
+    value: 1
+  layer-log-prob-strat:
+    value: "p_pred"
+  n-epoch:
+    value: 1
+  run-group:
+    value: "camera-sigma-cifar"
+  wandb-mode:
+    value: "online"
+  activation-lr:
+    value: 0.01
+  layer-sample-strat:
+    value: "map"
+  layer-update-strat:
+    value: "bayes"
+  ensemble-proposal-strat:
+    value: "mode"
+  ensemble-log-joint-strat:
+    value: "individual"
+  dataset:
+    value: "cifar10"
+  dataset-mode:
+    value: "all"
+  n-data:
+    value: 1024
+  n-batch:
+    value: 1
+  T-infer:
+    value: 500
