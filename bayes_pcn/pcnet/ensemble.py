@@ -128,8 +128,8 @@ class PCNetEnsemble:
 
         infer_info = dict()
         for n in range(1, n_repeat+1):
-            data_acts = a_group.get_acts(layer_index=0, detach=True)
-            a_group = self.initialize_activation_group(X_obs=data_acts)
+            # data_acts = a_group.get_acts(layer_index=0, detach=True)
+            # a_group = self.initialize_activation_group(X_obs=data_acts)
             hidden_info, obs_info = None, None
             # Update hidden layer while fixing obs layer
             if self._n_layers > 1:
