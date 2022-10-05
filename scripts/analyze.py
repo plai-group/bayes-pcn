@@ -8,6 +8,7 @@ import pdb
 SWEEPS = ['h-dim', 'act-fn', 'n-layers', 'n-models']
 # SWEEPS = ['sigma-prior', 'sigma-obs']
 # SWEEPS = ['dataset']
+# SWEEPS = ['n-layers']
 
 
 def print_run(df: pd.DataFrame, run_name: str):
