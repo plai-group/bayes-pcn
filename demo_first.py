@@ -12,14 +12,6 @@ from bayes_pcn.util import load_config
 
 
 """
-TLDR: Used for debugging or quick visualization.
-
-Load a trained model and print its performance on a specific train/test batch.
-Test dataloaders don't have to be the same as one used while training.
-
-Usage: `python examine.py --path=...`
-
-
 Goal
 - Left side of the image has the training images flipping by 3 frames per second
 for up to 60 images
@@ -86,41 +78,6 @@ def extract_batch(pred_batch, data_index):
     new_batch = DataBatch(train=train, tests=tests, train_pred=train_pred, tests_pred=tests_pred,
                           original_shape=pred_batch.original_shape)
     return new_batch
-
-
-# def get_test_merged_batch(data_batch, index):
-#     # Create a DataBatch with the test images with different noises combined
-#     data, fixed_indices = [], []
-#     for i in range(0, index+1):
-#         np.random.seed(i)
-#         noise_name = np.random.choice([k for k in data_batch.tests.keys()])
-#         curr_data, curr_fixed_indices = data_batch.tests[noise_name]
-#         data.append(curr_data[i])
-#         fixed_indices.append(curr_fixed_indices[i])
-#     tests = dict(custom=(torch.stack(data, dim=0), torch.stack(fixed_indices, dim=0)))
-#     return DataBatch(train=data_batch.train, tests=tests, train_pred=data_batch.train_pred,
-#                      tests_pred=data_batch.tests_pred, original_shape=data_batch.original_shape)
-
-
-# def visualize_index(path, index, n_repeat, dataset_mode, save_dir):
-#     os.makedirs(save_dir, exist_ok=True)
-#     model, args = load_config(path)
-#     args.dataset_mode = dataset_mode
-#     args.n_data, args.n_batch, args.n_batch_score = index+1, index+1, index+1
-#     learn_loaders, _, _ = dataset_dispatcher(args)
-#     train_loader, test_loaders = separate_train_test(learn_loaders)
-#     train_loader, test_loaders = iter(train_loader), {k: iter(v) for k, v in test_loaders.items()}
-#     data_batch = get_next_data_batch(train_loader=train_loader, test_loaders=test_loaders)
-#     data_batch = get_test_merged_batch(data_batch, index)
-#     result, pred_batch = score_data_batch(data_batch=data_batch, model=model,
-#                                           acc_thresh=0.005, n_repeat=n_repeat)
-#     result = {k: round(v, 5) for k, v in result.items()}
-#     print(json.dumps(result, sort_keys=True, indent=4))
-#     for i in range(args.n_batch):
-#         os.makedirs(os.path.join(save_dir, f"{index}"), exist_ok=True)
-#         curr_batch = extract_batch(pred_batch=pred_batch, data_index=i)
-#         batch_img = plot_data_batch(data_batch=curr_batch)
-#         batch_img.image.save(os.path.join(save_dir, f"{index}/{i}.png"), "PNG")
 
 
 def get_test_merged_batch(data_batch, index):

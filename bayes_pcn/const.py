@@ -24,9 +24,11 @@ class LayerSampleStrat(ArgParseEnum):
 
 
 class LayerUpdateStrat(ArgParseEnum):
-    ML = 'ml'        # Gradient descent update on weights given activations
-    BAYES = 'bayes'  # Conjugate Bayesian update on weights given activations
-    MHN = 'mhn'      # Create a new PCNet model per observation
+    ML = 'ml'            # Gradient descent update on weights given activations
+    BAYES = 'bayes'      # Conjugate Bayesian update on weights given activations
+    MHN = 'mhn'          # Create a new PCNet model per observation
+    KERNEL = 'kernel'    # Gaussian process "weight update" given activations
+    NOISING = 'noising'  # Use diffusion variational distribution
 
 
 class EnsembleLogJointStrat(ArgParseEnum):
@@ -41,7 +43,8 @@ class MHNMetric(ArgParseEnum):
 
 class EnsembleProposalStrat(ArgParseEnum):
     MODE = 'mode'  # Proposal distribution always returns the mean
-    FULL = 'full'  # Proposal distribution uses a full covariance matrix
+    DIAG = 'diag'  # Proposal distribution over activations have diagonal covariance
+    FULL = 'full'  # Proposal distribution uses a full covariance matrix (VLB)
 
 
 class ActInitStrat(ArgParseEnum):
@@ -49,6 +52,11 @@ class ActInitStrat(ArgParseEnum):
     RANDN = 'randn'          # Initialize hidden activation values to kaiming normal samples
     SAMPLE = 'sample'        # Initialize hidden activation values to model samples
     RANDNPLUS = 'randnplus'  # Initialize hidden activation values to truncated kaiming normal
+
+
+class WeightInitStrat(ArgParseEnum):
+    FIXED = 'fixed'  # Initialize hidden activation values to zeroes
+    RANDN = 'randn'  # Initialize network weight means to kaiming normal samples
 
 
 class ActFn(ArgParseEnum):
@@ -59,6 +67,13 @@ class ActFn(ArgParseEnum):
     SOFTMAX = 'softmax'
     LWTA_SPARSE = 'lwta_sparse'
     LWTA_DENSE = 'lwta_dense'
+    DPFP = 'dpfp'
+
+
+class Kernel(ArgParseEnum):
+    RELU = 'relu'
+    ARCCOS = 'arccos'
+    RBF = 'rbf'
 
 
 class Dataset(ArgParseEnum):

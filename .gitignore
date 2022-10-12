@@ -1,6 +1,6 @@
 .vscode
 data
-demo_dir
+demo_*
 env
 figs
 model_*

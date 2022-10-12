@@ -18,7 +18,7 @@ def add_text(img, text):
     pil_im = Image.fromarray(cv2_im_rgb)
     draw = ImageDraw.Draw(pil_im)
     # Choose a font
-    font = ImageFont.truetype("GidoleFont/Gidole-Regular.ttf", 12)
+    font = ImageFont.truetype("./Gidole-Regular.ttf", 12)
     # Draw the text
     text_location = (516, 2)
     draw.text(text_location, text, font=font)
@@ -27,15 +27,15 @@ def add_text(img, text):
 
 
 def to_video(img_array):
-    size = (img_array[0].shape[0], img_array[0].shape[1])
-    out = cv2.VideoWriter(f"demo_dir/{TYPE}.avi", cv2.VideoWriter_fourcc(*'DIVX'), 20, size)
+    size = (img_array[0].shape[1], img_array[0].shape[0])
+    out = cv2.VideoWriter(f"demo_camera/{TYPE}.avi", cv2.VideoWriter_fourcc(*'DIVX'), 20, size)
     for i in range(len(img_array)):
         out.write(img_array[i])
     out.release()
 
 
 img_array = []
-glob_result = glob.glob(f"demo_dir/{TYPE}/*.png")
+glob_result = glob.glob(f"demo_camera/{TYPE}/*.png")
 file_iter = sorted(glob_result, key=lambda p: int(os.path.basename(p).split('_')[-1][:-4]))
 for i, filename in enumerate(file_iter):
     img = cv2.imread(filename)

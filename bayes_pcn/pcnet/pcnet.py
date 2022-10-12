@@ -1,9 +1,11 @@
+import pyro
 import torch
 from typing import List, Tuple
 
 from bayes_pcn.const import *
-from .a_group import ActivationGroup
-from .layers import *
+from .activations import ActivationGroup
+from .layers import AbstractPCLayer, PCLayer, PCTopLayer
+from .structs import *
 from .util import *
 
 
@@ -43,8 +45,8 @@ class PCNet:
                 traces.append(result)
         return result, ActivationGroup(activations=traces[::-1], no_param=True)
 
-    def log_joint(self, a_group: ActivationGroup,
-                  log_prob_strat: LayerLogProbStrat = None) -> torch.Tensor:
+    def log_joint(self, a_group: ActivationGroup, log_prob_strat: LayerLogProbStrat = None,
+                  batch_independence: bool = False) -> LogProbResult:
         """Return log joint of network layer activations.
 
         Args:
@@ -53,15 +55,18 @@ class PCNet:
         Returns:
             torch.Tensor: Log probability vector of shape <d_batch>.
         """
-        result = 0.  # torch.zeros(a_group.d_batch).to(self.device)
+        layer_log_probs = []
         for i, layer in enumerate(self.layers):
             upper_activation = a_group.get_acts(layer_index=i+1, detach=False)
             lower_activation = a_group.get_acts(layer_index=i, detach=False)
-            log_prob_args = dict(X_obs=lower_activation, X_in=upper_activation)
+            log_prob_args = dict(X_obs=lower_activation, X_in=upper_activation,
+                                 batch_independence=batch_independence)
             if log_prob_strat is not None:
                 log_prob_args['log_prob_strat'] = log_prob_strat
-            result = result + layer.log_prob(**log_prob_args)
-        return result
+            layer_log_probs.append(layer.log_prob(**log_prob_args))
+        result = sum(layer_log_probs)
+        return LogProbResult(log_prob=result,
+                             layer_log_probs=[lp.detach() for lp in layer_log_probs])
 
     def update_weights(self, a_group: ActivationGroup, **kwargs) -> None:
         """Update all layer weights according to self._layer_update_strat given

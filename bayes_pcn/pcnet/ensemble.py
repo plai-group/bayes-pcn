@@ -1,9 +1,12 @@
+from copy import deepcopy
 import random
 import torch
 from typing import List
 
-from bayes_pcn.const import *
+from ..const import *
+from .activations import *
 from .pcnet import PCNet
+from .structs import *
 from .updater import *
 from .util import *
 
@@ -12,7 +15,7 @@ class PCNetEnsemble:
     def __init__(self, n_models: int, n_layers: int, x_dim: int, h_dim: int, act_fn: ActFn,
                  infer_T: int, infer_lr: float, sigma_prior: float, sigma_obs: float,
                  sigma_data: float, activation_optim: str, n_proposal_samples: int,
-                 activation_init_strat: str, layer_log_prob_strat: str,
+                 activation_init_strat: str, weight_init_strat: str, layer_log_prob_strat: str,
                  layer_sample_strat: str, layer_update_strat: str, ensemble_log_joint_strat: str,
                  ensemble_proposal_strat: str, scale_layer: bool, **kwargs) -> None:
         self._n_models: int = n_models
@@ -28,15 +31,21 @@ class PCNetEnsemble:
         self._activation_optim: str = activation_optim
         self._log_weights: torch.Tensor = (torch.ones(self._n_models) / self._n_models).log()
         self._beta_forget = kwargs.get('beta_forget')
+        self._n_elbo_particles = kwargs.get('n_elbo_particles')
         act_fn = ActFn.get_enum_from_value(act_fn)
+        kernel_type = Kernel.get_enum_from_value(kwargs.get('kernel_type'))
+        self.weight_init_strat = WeightInitStrat.get_enum_from_value(weight_init_strat)
 
-        base_models_init_args = dict(n_models=n_models, act_fn=act_fn, bias=kwargs.get('bias'))
+        base_models_init_args = dict(weight_init_strat=self.weight_init_strat, act_fn=act_fn,
+                                     n_models=n_models, bias=kwargs.get('bias'),
+                                     kernel_type=kernel_type)
         if LayerUpdateStrat.get_enum_from_value(layer_update_strat) == LayerUpdateStrat.MHN:
             # HACK: Makes MHN memory efficient
             base_models_init_args['economy_mode'] = True
         self._pcnets: List[PCNet] = self._initialize_base_models(**base_models_init_args)
 
         self.activation_init_strat = ActInitStrat.get_enum_from_value(activation_init_strat)
+        self.weight_init_strat = WeightInitStrat.get_enum_from_value(weight_init_strat)
         self.layer_log_prob_strat = LayerLogProbStrat.get_enum_from_value(layer_log_prob_strat)
         self.layer_sample_strat = LayerSampleStrat.get_enum_from_value(layer_sample_strat)
         self.layer_update_strat = LayerUpdateStrat.get_enum_from_value(layer_update_strat)
@@ -50,7 +59,8 @@ class PCNetEnsemble:
                               proposal_strat=self.ensemble_proposal_strat,
                               infer_lr=infer_lr, infer_T=infer_T,
                               n_proposal_samples=n_proposal_samples,
-                              activation_optim=activation_optim)
+                              activation_optim=activation_optim,
+                              n_elbo_particles=self._n_elbo_particles)
         if self.ensemble_log_joint_strat == EnsembleLogJointStrat.SHARED:
             update_fn_args['ensemble_log_joint'] = self.log_joint
 
@@ -58,10 +68,12 @@ class PCNetEnsemble:
             assert self.layer_log_prob_strat == LayerLogProbStrat.MAP
             update_fn_args['weight_lr'] = kwargs.get('weight_lr', None)
             self._updater = MLUpdater(**update_fn_args)
-        elif self.layer_update_strat == LayerUpdateStrat.BAYES:
+        elif self.layer_update_strat in [LayerUpdateStrat.BAYES, LayerUpdateStrat.KERNEL]:
             update_fn_args['resample'] = kwargs.get('resample', False)
             if self.ensemble_proposal_strat == EnsembleProposalStrat.MODE:
                 self._updater = VLBModeUpdater(**update_fn_args)
+            elif self.ensemble_proposal_strat == EnsembleProposalStrat.DIAG:
+                self._updater = ReparamVIUpdater(**update_fn_args)
             elif self.ensemble_proposal_strat == EnsembleProposalStrat.FULL:
                 self._updater = VLBFullUpdater(**update_fn_args)
             else:
@@ -70,41 +82,49 @@ class PCNetEnsemble:
             metric = MHNMetric.get_enum_from_value(kwargs.get('mhn_metric', MHNMetric.DOT.value))
             update_fn_args = dict(pcnet_template=deepcopy(self._pcnets[0]), metric=metric)
             self._updater = MHNUpdater(**update_fn_args)
+        elif self.layer_update_strat == LayerUpdateStrat.NOISING:
+            assert self.layer_log_prob_strat == LayerLogProbStrat.MAP
+            update_fn_args['weight_lr'] = kwargs.get('weight_lr', None)
+            update_fn_args['beta_noise'] = kwargs.get('beta_noise', None)
+            self._updater = NoisingMLUpdater(**update_fn_args)
         else:
             raise NotImplementedError()
 
-    def delete(self, X_obs: torch.Tensor, fixed_indices: torch.Tensor = None) -> None:
-        """Delete an observation from the memory. NOTE: Numerically unstable at the moment.
+    def forget(self, beta_forget: float = None) -> None:
+        """Apply forget operation to each model in the ensemble.
 
         Args:
-            X_obs (torch.Tensor): Observation to delete.
-            fixed_indices (torch.Tensor, optional): Matrix of shape <d_batch x x_dim> that denotes
-                which data-specific indices to prevent modification when predicting.
+            beta_forget (float, optional): Forget strength. Higher is more. Defaults to None.
         """
-        X_obs = X_obs.to(self.device)
-        if fixed_indices_exists(fixed_indices=fixed_indices):
-            fixed_indices = fixed_indices.to(self.device)
-        a_group = self.initialize_activation_group(X_obs=X_obs)
-
-        # Update hidden layer while fixing obs layer
-        a_group.clamp(obs=True, hidden=False)
-        maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
-                           infer_lr=self._infer_lr, infer_T=self._infer_T,
-                           fixed_indices=fixed_indices, activation_optim=self._activation_optim)
-        for pcnet in self._pcnets:
-            pcnet.delete_from_weights(a_group=a_group)
-
-    def forget(self, beta_forget: float = None) -> None:
         for pcnet in self._pcnets:
             pcnet.forget(beta_forget=self._beta_forget if beta_forget is None else beta_forget)
 
     def infer(self, X_obs: torch.Tensor, fixed_indices: torch.Tensor = None,
               n_repeat: int = 1) -> Prediction:
+        """Perform memory recall using X_obs as the input.
+
+        Args:
+            X_obs (torch.Tensor): Data matrix of shape <d_batch x x_dim>.
+            fixed_indices (torch.Tensor, optional): A boolean matrix detailing which elements of
+                                                   X_obs to not modify during recall. Its shape
+                                                   should be <d_batch x x_dim>. If None, assuming
+                                                   all elements can be changed.
+            n_repeat (int, optional): How many times to perform ICM. Typically, the higher this is
+                                    the better the recall result will be at the cost of additional
+                                    computation. Defaults to 1.
+
+        Returns:
+            Prediction: A struct containing the recall result and other miscellaneous info.
+        """
         original_device = X_obs.device
         X_obs = X_obs.to(self.device)
-        if fixed_indices_exists(fixed_indices=fixed_indices):
-            fixed_indices = fixed_indices.to(self.device)
         a_group = self.initialize_activation_group(X_obs=X_obs)
+        is_heteroassociative = fixed_indices_exists(fixed_indices=fixed_indices)
+        if is_heteroassociative:
+            fixed_indices = fixed_indices.to(self.device)
+            infer_T, n_repeat = n_repeat * self._infer_T, 1
+        else:
+            infer_T = self._infer_T
 
         infer_info = dict()
         for n in range(1, n_repeat+1):
@@ -115,16 +135,15 @@ class PCNetEnsemble:
             if self._n_layers > 1:
                 a_group.clamp(obs=True, hidden=False)
                 hidden_info = maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
-                                                 infer_lr=self._infer_lr,
-                                                 infer_T=self._infer_T,
+                                                 infer_lr=self._infer_lr, infer_T=infer_T,
                                                  fixed_indices=fixed_indices,
-                                                 activation_optim=self._activation_optim)
+                                                 activation_optim=self._activation_optim,
+                                                 n_particles=self._n_elbo_particles)
             # Update obs layer while fixing hidden layers
-            if self._n_layers == 1 or not fixed_indices_exists(fixed_indices=fixed_indices):
+            if self._n_layers == 1 or not is_heteroassociative:
                 a_group.clamp(obs=False, hidden=True)
                 obs_info = maximize_log_joint(log_joint_fn=self.log_joint, a_group=a_group,
-                                              infer_lr=self._infer_lr,
-                                              infer_T=self._infer_T,
+                                              infer_lr=self._infer_lr, infer_T=infer_T,
                                               fixed_indices=fixed_indices,
                                               activation_optim=self._activation_optim)
             infer_info[f"repeat_{n}"] = {'hidden': hidden_info, 'obs': obs_info}
@@ -135,6 +154,18 @@ class PCNetEnsemble:
         return Prediction(data=X_pred, a_group=a_group, info=infer_info)
 
     def initialize_activation_group(self, X_obs: torch.Tensor) -> ActivationGroup:
+        """Given observations, construct an ActivationGroup object.
+
+        Args:
+            X_obs (torch.Tensor): A matrix of shape <d_batch x x_dim>
+
+        Raises:
+            NotImplementedError: _description_
+
+        Returns:
+            ActivationGroup: An object containing appropriate latent neuron activation vectors
+                            corresponding to each entry in X_obs.
+        """
         d_batch = X_obs.shape[0]
         activations = [X_obs]
         if self.activation_init_strat == ActInitStrat.FIXED:
@@ -153,9 +184,18 @@ class PCNetEnsemble:
             raise NotImplementedError()
         else:
             raise NotImplementedError()
-        return ActivationGroup(activations=activations)
+        use_activations_stdevs = self.ensemble_proposal_strat == EnsembleProposalStrat.DIAG
+        return ActivationGroup(activations=activations, stochastic=use_activations_stdevs)
 
     def learn(self, X_obs: torch.Tensor) -> UpdateResult:
+        """Update memory content with X_obs.
+
+        Args:
+            X_obs (torch.Tensor): Datapoints to memorize of shape <d_batch x x_dim>.
+
+        Returns:
+            UpdateResult: A struct containing updated models, weights, and other info.
+        """
         X_obs = X_obs.to(self.device)
         updater_args = dict(X_obs=X_obs, pcnets=self._pcnets, log_weights=self._log_weights)
         update_result = self._updater(**updater_args)
@@ -163,18 +203,28 @@ class PCNetEnsemble:
         self._log_weights = update_result.log_weights
         return update_result
 
-    def log_joint(self, a_group: ActivationGroup,
-                  log_prob_strat: LayerLogProbStrat = None) -> torch.Tensor:
-        ljs = torch.stack([pcnet.log_joint(a_group=a_group, log_prob_strat=log_prob_strat)
-                           for pcnet in self._pcnets], dim=1)
-        weighted_ljs = ljs + self._log_weights.unsqueeze(0)
-        return torch.logsumexp(weighted_ljs, dim=-1)
+    def log_joint(self, a_group: ActivationGroup, log_prob_strat: LayerLogProbStrat = None,
+                  batch_independence: bool = False) -> LogProbResult:
+        """Return the joint log probability and the layerwise log probabilities of the
+        input activation group. If there are multiple pcnets, only return the layerwise
+        log probabilities of the last pcnet.
 
-    def rebind(self, X_obs: torch.Tensor, fixed_indices: torch.Tensor) -> UpdateResult:
-        delete_result = self.delete(X_obs=X_obs, fixed_indices=fixed_indices)
-        learn_result = self.learn(X_obs=X_obs)
-        rebind_info = dict(delete=delete_result, learn=learn_result)
-        return UpdateResult(pcnets=None, log_weights=None, info=rebind_info)
+        Args:
+            a_group (ActivationGroup): _description_
+            log_prob_strat (LayerLogProbStrat, optional): _description_. Defaults to None.
+
+        Returns:
+            LogProbResult: _description_
+        """
+        lps = []
+        for pcnet in self._pcnets:
+            lp_result = pcnet.log_joint(a_group=a_group, log_prob_strat=log_prob_strat,
+                                        batch_independence=batch_independence)
+            lps.append(lp_result.log_prob)
+        lps = torch.stack(lps, dim=1)
+        weighted_ljs = lps + self._log_weights.unsqueeze(0)
+        log_joint = torch.logsumexp(weighted_ljs, dim=-1)
+        return LogProbResult(log_prob=log_joint, layer_log_probs=lp_result.layer_log_probs)
 
     def sample(self, d_batch: int = 1, a_group: ActivationGroup = None,
                X_top: torch.Tensor = None) -> Sample:
@@ -187,7 +237,7 @@ class PCNetEnsemble:
                                             layer of a hierarchical network. Defaults to None.
 
         Returns:
-            (Sample): Sample object with <d_batch x x_dim> data and <d_batch> log joint tensors.
+            Sample: Sample object with <d_batch x x_dim> data and <d_batch> log joint tensors.
         """
         info = []
         weights = (self._log_weights - self._log_weights.logsumexp(dim=0)).exp()
@@ -203,7 +253,7 @@ class PCNetEnsemble:
         random.shuffle(info)
         data = torch.cat([sample_info[0] for sample_info in info], dim=0)
         a_group = ActivationGroup.merge(a_groups=[sample_info[1] for sample_info in info])
-        log_joint = self.log_joint(a_group=a_group)
+        log_joint = self.log_joint(a_group=a_group).log_prob
         return Sample(data=data, log_joint=log_joint)
 
     def _initialize_base_models(self, n_models: int, act_fn: ActFn, **kwargs) -> List[PCNet]:

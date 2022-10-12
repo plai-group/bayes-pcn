@@ -33,8 +33,8 @@ def get_depth_width_df(df_all: pd.DataFrame, metrics: List[str]):
 
 
 def plot_depth_width_df(df: pd.DataFrame):
-    nrows, ncols = 2, 3
-    fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(6, 4.5), sharex=True, sharey=True)
+    nrows, ncols = 3, 3
+    fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(6, 6), sharex=True, sharey=True)
     metrics = [c for c in df.columns if '_acc' in c]
 
     x_axis = np.arange(len(df['n_data'].unique()))

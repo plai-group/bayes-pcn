@@ -1,2 +1,3 @@
+from .activations import ActivationGroup
 from .ensemble import PCNetEnsemble
-from .util import DataBatch, Prediction, UpdateResult
+from .structs import *
