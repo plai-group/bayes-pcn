@@ -44,28 +44,6 @@ def get_parser() -> argparse.ArgumentParser:
     return parser
 
 
-"""
-def visualize_index(path, index, n_repeat, dataset_mode, save_dir):
-    os.makedirs(save_dir, exist_ok=True)
-    model, args = load_config(path)
-    args.dataset_mode = dataset_mode
-    learn_loaders, _, _ = dataset_dispatcher(args)
-    train_loader, test_loaders = separate_train_test(learn_loaders)
-    train_loader, test_loaders = iter(train_loader), {k: iter(v) for k, v in test_loaders.items()}
-
-    test_loader_name = np.random.choice([k for k in test_loaders.keys()])
-    test_loaders = {test_loader_name: test_loaders[test_loader_name]}
-    for _ in range(index+1):
-        data_batch = get_next_data_batch(train_loader=train_loader, test_loaders=test_loaders)
-    result, pred_batch = score_data_batch(data_batch=data_batch, model=model,
-                                          acc_thresh=0.005, n_repeat=n_repeat)
-    result = {k: round(v, 5) for k, v in result.items()}
-    batch_img = plot_data_batch(data_batch=pred_batch)
-    print(json.dumps(result, sort_keys=True, indent=4))
-    batch_img.image.save(os.path.join(save_dir, f"{index}.png"), "PNG")
-"""
-
-
 def extract_batch(pred_batch, data_index):
     def extract_category(cat_tuple):
         first = cat_tuple[0][data_index:data_index+1, :]

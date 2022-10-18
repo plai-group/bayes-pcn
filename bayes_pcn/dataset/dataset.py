@@ -1,9 +1,10 @@
+import io
 import numpy as np
 import os
 from PIL import Image
 import torch
 import torch.distributions as dists
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 from typing import Dict, Tuple, Any, Optional, Callable
@@ -175,6 +176,46 @@ class Flickr30kRecall(datasets.Flickr30k):
         return img, fixed_indices
 
 
+class StarWarsRecall(Dataset):
+    """Loads the custom star wars dataset of image shape 64 x 64."""
+
+    def __init__(self, root: str, noise_transform: Optional[Callable] = None,
+                 transform: Optional[Callable] = None,
+                 transform_post: Optional[Callable] = None, **kwargs):
+        """
+        Args:
+            root_dir (string): Directory with all the images.
+            transform (callable, optional): Optional transform to be applied
+                on a sample.
+        """
+        self.root = os.path.join(root, "neurips_anakin_resized")
+        self.transform = transform
+        self.noise_transform = noise_transform
+        self.transform_post = transform_post
+
+    def __len__(self):
+        return len(os.listdir(self.root))
+
+    def __getitem__(self, index: int) -> Tuple[Any, Any]:
+        img_id = index + 1
+
+        filename = os.path.join(self.root, f"{img_id}.png")
+        img = Image.open(filename).convert('RGB')
+
+        if self.transform is not None:
+            img = self.transform(img)
+
+        if self.noise_transform is not None:
+            img, fixed_indices = self.noise_transform(img)
+        else:
+            fixed_indices = torch.zeros(img.shape)
+
+        if self.transform_post is not None:
+            img = self.transform_post(img)
+
+        return img, fixed_indices
+
+
 def separate_train_test(loaders: Dict[str, DataLoader]) -> Tuple[DataLoader, Dict[str, DataLoader]]:
     train_loader = loaders['train']
     test_loaders = {name: loader for name, loader in loaders.items() if name != 'train'}
@@ -269,6 +310,16 @@ def flickr30k(**kwargs) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader], D
     return learn_loaders, score_loaders, info
 
 
+def starwars(**kwargs) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader], Dict[str, Any]]:
+    assert kwargs["data_size"] <= 60
+    x_dim = 3 * 64 * 64
+    learn_loaders, score_loaders, train, tests = get_dataset(dataset_cls=StarWarsRecall,
+                                                             **kwargs)
+    classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+    info = {'classes': classes, 'train': train, 'test': tests, 'x_dim': x_dim}
+    return learn_loaders, score_loaders, info
+
+
 def dataset_dispatcher(args):
     data_size = args.n_data
     args.n_batch = data_size if args.n_batch is None else args.n_batch
@@ -294,5 +345,7 @@ def dataset_dispatcher(args):
         return tinyimagenet(**dataset_args)
     elif args.dataset == 'flickr30k':
         return flickr30k(**dataset_args)
+    elif args.dataset == 'starwars':
+        return starwars(**dataset_args)
     else:
         raise NotImplementedError()

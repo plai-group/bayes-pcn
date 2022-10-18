@@ -66,8 +66,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument('--kernel-type', type=Kernel, default=Kernel.RBF, choices=list(Kernel))
 
     # data configs
-    parser.add_argument('--dataset', type=str, choices=['cifar10', 'tinyimagenet', 'flickr30k'],
-                        default='cifar10')
+    parser.add_argument('--dataset', type=Dataset, choices=list(Dataset), default=Dataset.CIFAR10)
     parser.add_argument('--dataset-mode', type=str, default='fast',
                         choices=['fast', 'mix', 'white', 'drop', 'mask', 'all'],
                         help='Specifies test dataset configuration.')

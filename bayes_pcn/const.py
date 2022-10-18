@@ -80,6 +80,7 @@ class Dataset(ArgParseEnum):
     CIFAR10 = 'cifar10'
     TINYIMAGENET = 'tinyimagenet'
     FLICKR30K = 'flickr30k'
+    STARWARS = 'starwars'
 
 
 class DatasetMode(ArgParseEnum):
