@@ -14,7 +14,7 @@ def add_text(img, text, text_location):
     pil_im = Image.fromarray(cv2_im_rgb)
     draw = ImageDraw.Draw(pil_im)
     # Choose a font
-    font = ImageFont.truetype("GidoleFont/Gidole-Regular.ttf", 14)
+    font = ImageFont.truetype("../Gidole-Regular.ttf", 14)
     # Draw the text
     draw.text(text_location, text, font=font, align='center')
     # Save the image
@@ -38,9 +38,17 @@ def plot_image_iter(trains, queries, recalls, recall_index):
     return img
 
 
+def save_images(img_array):
+    pics_dir = "demo_dir/starwars_relu_gif_pics"
+    os.makedirs(pics_dir, exist_ok=True)
+    for i, img in enumerate(img_array):
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        Image.fromarray(img).save(os.path.join(pics_dir, f"{i+1}.png"), "PNG")
+
+
 def to_video(img_array):
     size = (img_array[1].shape[1], img_array[0].shape[0])
-    out = cv2.VideoWriter(f"demo_dir/first.avi", cv2.VideoWriter_fourcc(*'DIVX'), 4, size)
+    out = cv2.VideoWriter(f"demo_dir/starwars-relu.avi", cv2.VideoWriter_fourcc(*'DIVX'), 4, size)
     for i in range(len(img_array)):
         out.write(img_array[i])
     out.release()
@@ -57,7 +65,7 @@ def list_contents(dir):
 # file_iter = sorted(glob_result, key=lambda p: int(os.path.basename(p).split('_')[-1][:-4]))
 MAX_LEN = 60
 trains, queries, all_recalls = [], [], []
-dir_iter = list_contents("demo_dir/first/*")
+dir_iter = list_contents("demo_dir/starwars-relu/*")
 for i, dirname in enumerate(dir_iter):
     if i >= MAX_LEN:
         break
@@ -77,4 +85,5 @@ for i in range(MAX_LEN):
     img = plot_image_iter(trains, queries, all_recalls[i], i)
     img_array.append(img)
 
+save_images(img_array)
 to_video(img_array)
