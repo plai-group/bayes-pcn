@@ -7,7 +7,7 @@ import pyro
 import pyro.distributions as pdists
 
 from bayes_pcn.const import *
-from bayes_pcn.pcnet.util import is_PD, nearest_PD
+from bayes_pcn.pcnet.util import is_PD, nearest_PD, gmm_log_marginal, gmm_log_posterior
 from bayes_pcn.pcnet.kernels import get_kernel_sigmas, kernel_log_prob, kernel_posterior_params
 from .activations import local_wta, dpfp
 
@@ -41,6 +41,10 @@ class AbstractPCLayer(ABC):
             self._ml_update(X_obs=X_obs, **kwargs)
         else:
             raise NotImplementedError()
+
+    @abstractmethod
+    def param_norm(self, name: str) -> float:
+        raise NotImplementedError()
 
     def _error(self, X_obs: torch.Tensor, **kwargs) -> torch.Tensor:
         return X_obs - self.predict(**kwargs)
@@ -360,8 +364,19 @@ class PCLayer(AbstractPCLayer):
     def fix_parameters(self, parameters: torch.Tensor):
         self._R = parameters
 
+    def param_norm(self, name: str) -> float:
+        if name == "R":
+            param = self._R
+        elif name == "U":
+            param = self._U
+        elif name == "U_diag":
+            param = self._U.diag()
+        else:
+            raise NotImplementedError()
+        return param.abs().mean().item()
 
-class PCTopLayer(AbstractPCLayer):
+
+class GaussianLayer(AbstractPCLayer):
     def __init__(self, layer_index: int, d_out: int, sigma_prior: float,
                  sigma_obs: float, **kwargs) -> None:
         self._name = f"layer_{layer_index}"
@@ -506,3 +521,209 @@ class PCTopLayer(AbstractPCLayer):
 
     def fix_parameters(self, parameters: torch.Tensor):
         self._R = parameters
+
+    def param_norm(self, name: str) -> float:
+        if name == "R":
+            param = self._R
+        elif name == "U":
+            param = self._U
+        elif name == "U_diag":
+            param = self._U.diag()
+        else:
+            raise NotImplementedError()
+        return param.abs().mean().item()
+
+
+class KWayGMMLayer(AbstractPCLayer):
+    def __init__(self, layer_index: int, K: int, n_components: int, d_out: int,
+                 sigma_prior: float, sigma_obs: float, **kwargs) -> None:
+        """
+        Captures GMM layer at the top of the predictive coding network.
+
+        Constructor Parameters
+        - K: Number of parallel GMMs
+        - n_components: Number of components in each GMM
+        - d_out: Dimensionality of the continuous vector; should be divisible by K
+        - Sigma_prior: Prior uncertainty over GMM component means
+        - sigma_obs: GMM observation noise
+
+        Should maintain K component importance vectors that can get reconfigured
+        in the temporal setting.
+        """
+        assert d_out % K == 0 and K > 0
+        self._name = f"layer_{layer_index}"
+        self._K = K
+        self._n_components = n_components
+        self._d_out = d_out
+        self._d_out_gmm = d_out // K
+
+        self._log_prob_strat: LayerLogProbStrat = None
+        self._sample_strat: LayerSampleStrat = None
+        self._update_strat: LayerUpdateStrat = None
+        self._device = torch.device('cpu')
+        self._weight_lr = kwargs.get('weight_lr', None)
+
+        # Initialize K GMM parameters
+        self._params = []
+        for _ in range(K):
+            # Component importance vector of shape <n_components>
+            pi = torch.ones(n_components) / n_components
+            # Matrix normal prior mean matrix of shape <n_components x (d_out / K)>
+            if kwargs.get('weight_init_strat') == WeightInitStrat.FIXED:
+                R = torch.zeros(n_components, self._d_out_gmm)
+            else:
+                R = torch.empty(n_components, self._d_out_gmm)
+                torch.nn.init.normal_(R, 0, self._d_out_gmm**-0.5)
+            # Matrix normal prior covariance matrix of shape <n_components x n_components>
+            U = torch.eye(n_components) * sigma_prior ** 2
+            self._params.append(dict(pi=pi, R=R, U=U, z=None))
+
+        # Isotropic observation variance
+        self._Sigma = sigma_obs ** 2
+
+        self._R_original = deepcopy(self._params[0]["R"])
+        self._U_original = deepcopy(self._params[0]["U"])
+
+    def log_prob(self, X_obs: torch.Tensor, **kwargs) -> torch.Tensor:
+        """Return log probability under the model, log p(x^{l} | z^{1:K}).
+
+        Args:
+            X_obs (torch.Tensor): Observation matrix of shape <d_batch x d_out>.
+
+        Returns:
+            torch.Tensor: Log probability vector of shape <d_batch>.
+        """
+        result = 0.
+        for k in range(self._K):
+            params = self._params[k]
+            X = X_obs[:, k*self._d_out_gmm:(k+1)*self._d_out_gmm]
+            log_prob_strat = kwargs.get('log_prob_strat', self._log_prob_strat)
+            # FIXME: P_PRED case does not support batch training yet
+            U = params["U"] if log_prob_strat == LayerLogProbStrat.P_PRED else None
+            curr_log_prob = gmm_log_marginal(X=X, pi=params["pi"], sigma_obs=self._Sigma**0.5,
+                                             R=params["R"], U=U)
+            result += curr_log_prob
+        return result
+
+    def predict(self, X_in: torch.Tensor = None, d_batch: int = None, **kwargs) -> torch.Tensor:
+        """Returns the most likely GMM component means concatenated.
+
+        Args:
+            X_in (torch.Tensor, optional): _description_. Defaults to None.
+            d_batch (int, optional): _description_. Defaults to None.
+
+        Returns:
+            torch.Tensor: Matrix of shape <d_batch x d_out>
+        """
+        if d_batch is None:
+            d_batch = 1 if X_in is None else X_in.shape[0]
+        result = torch.concat([param["R"][param["pi"].argmax().item()] for param in self._params])
+        return result.repeat(d_batch, 1)
+
+    def sample(self, **kwargs) -> torch.Tensor:
+        """Sample current layer neuron values given upper layer neuron values. When
+        self._sample_strat is LayerSampleStrat.MAP and LayerSampleStrat.P_PRED, sample from
+        p(X_out| argmax_W p(W), self._Sigma, ...) and E[p(X_out| W, self._Sigma, ...)].
+
+        Returns:
+            torch.Tensor: Sampled lower layer neuron values of shape <d_batch x d_out>.
+        """
+        marginal_mean = self.predict(**kwargs)
+        if self._sample_strat == LayerSampleStrat.MAP:
+            marginal_Sigma = self._Sigma
+        elif self._sample_strat == LayerSampleStrat.P_PRED:
+            prior_vars = [p["U"][p["pi"].argmax().item()] for p in self._params]
+            prior_vars = torch.concat([torch.ones(self._d_out_gmm)*pv for pv in prior_vars])
+            marginal_Sigma = self._Sigma + prior_vars.to(marginal_mean.device)  # <d_out>
+        else:
+            raise NotImplementedError()
+        dist = pdists.Normal(torch.zeros_like(marginal_mean), marginal_Sigma ** 0.5)
+        obs = None if kwargs.get('X_obs') is None else (kwargs['X_obs']-marginal_mean)
+        sample = marginal_mean + pyro.sample(self._name, dist, obs=obs)
+        return sample
+
+    def _ml_update(self, X_obs: torch.Tensor, **kwargs) -> None:
+        """Expectation maximization of self._R given X_obs.
+        Reference: https://en.wikipedia.org/wiki/EM_algorithm_and_GMM_model
+
+        Args:
+            X_obs (torch.Tensor): Observed neuron values of shape <d_batch x d_out>.
+            lr (float, optional): Learning rate for layer weights.
+        """
+        for k in range(self._K):
+            params = self._params[k]
+            pi, R, U = params["pi"], params["R"], params["U"]
+            X = X_obs[:, k*self._d_out_gmm:(k+1)*self._d_out_gmm]
+            log_posterior = gmm_log_posterior(X=X, pi=pi, sigma_obs=self._Sigma**0.5, R=R, U=U)
+            params["R"] = torch.softmax(log_posterior, dim=0).T.matmul(X)
+
+    def _bayes_update(self, X_obs: torch.Tensor, **kwargs) -> None:
+        """Approximate Bayesian update of K GMMs. First, find the GMM component indices that
+        most likely generated X_obs. Then, conditioned on X_obs and indices, perform conjugate
+        Bayesian update on the network parameters.
+
+        Args:
+            X_obs (torch.Tensor): Data matrix of shape <d_batch x d_out>.
+        """
+        d_batch = X_obs.shape[0]
+        for k in range(self._K):
+            params = self._params[k]
+            pi, R, U = params["pi"], params["R"], params["U"]
+            X = X_obs[:, k*self._d_out_gmm:(k+1)*self._d_out_gmm]
+            Z_in = torch.zeros(self._n_components).to(X_obs.device)
+            Z_in[gmm_log_posterior(X=X, pi=pi, sigma_obs=self._Sigma**0.5, R=R, U=U).argmax()] = 1.
+
+            Sigma_c = Z_in.unsqueeze(0).matmul(U)
+            Sigma_obs = self._Sigma * torch.eye(d_batch).to(self.device)
+            Sigma_x = Sigma_c.matmul(Z_in.unsqueeze(0).T) + Sigma_obs
+            Sigma_x_inv = Sigma_x.inverse()
+            Sigma_c_T_Sigma_x_inv = Sigma_c.T.matmul(Sigma_x_inv)
+
+            R = R + Sigma_c_T_Sigma_x_inv.matmul(X - Z_in.matmul(R))
+            U = U - Sigma_c_T_Sigma_x_inv.matmul(Sigma_c)
+            self._params[k] = dict(pi=pi, R=R, U=U, z=Z_in)
+
+    def bayes_forget(self, beta_forget: float) -> None:
+        self._R = (1-beta_forget)**0.5*self._R + (1-(1-beta_forget)**0.5)*self._R_original
+        self._U = (1-beta_forget)*self._U + beta_forget*self._U_original
+        for k in range(self._K):
+            params = self._params[k]
+            R = (1-beta_forget)**0.5*params["R"] + (1-(1-beta_forget)**0.5)*self._R_original
+            U = (1-beta_forget)*params["U"] + beta_forget*self._U_original
+            self._params[k] = dict(pi=params["pi"], R=R, U=U, z=params["z"])
+
+    @property
+    def device(self):
+        return self._device
+
+    @device.setter
+    def device(self, value: torch.device):
+        self._device = value
+        for var in vars(self):
+            if isinstance(self.__dict__[var], torch.Tensor):
+                self.__dict__[var] = self.__dict__[var].to(value)
+        for params in self._params:
+            for k, v in params.items():
+                if isinstance(v, torch.Tensor):
+                    params[k] = v.to(value)
+
+    def weight_norm(self, p: int = 1) -> float:
+        return sum([params["R"].abs().mean().item() for params in self._params]) / self._K
+
+    def param_norm(self, name: str) -> float:
+        if name == "U_diag":
+            return sum([params["U"].diag().abs().mean().item() for params in self._params])/self._K
+        else:
+            return sum([params[name].abs().mean().item() for params in self._params])/self._K
+
+    def _bayes_delete(self, X_obs: torch.Tensor, **kwargs) -> None:
+        raise NotImplementedError()
+
+    def sample_parameters(self) -> torch.Tensor:
+        raise NotImplementedError()
+
+    def fix_parameters(self, parameters: torch.Tensor):
+        raise NotImplementedError()
+
+    def parameters_log_prob(self, parameters: torch.Tensor) -> float:
+        raise NotImplementedError()

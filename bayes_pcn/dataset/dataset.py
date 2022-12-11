@@ -3,7 +3,7 @@ import os
 from PIL import Image
 import torch
 import torch.distributions as dists
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 from typing import Dict, Tuple, Any, Optional, Callable
@@ -61,6 +61,27 @@ class MaskingNoise:
                              torch.zeros(height, n_masked_cols)),
                              dim=1).repeat((self.n_channels, 1, 1))
         return tensor * mask, mask
+
+
+class ToyRecall(Dataset):
+    """Loads the grid-like dataset whose points belong to 2D Euclidean space."""
+
+    def __init__(self, root: str, noise_transform: Optional[Callable] = None,
+                 transform: Optional[Callable] = None,
+                 transform_post: Optional[Callable] = None, **kwargs):
+        """
+        Args:
+            root_dir (string): Directory with all the images.
+            transform (callable, optional): Optional transform to be applied
+                on a sample.
+        """
+        raise NotImplementedError()
+
+    def __len__(self):
+        raise NotImplementedError()
+
+    def __getitem__(self, index: int) -> Tuple[Any, Any]:
+        raise NotImplementedError()
 
 
 class CIFAR10Recall(datasets.CIFAR10):
@@ -243,6 +264,14 @@ def get_dataset(dataset_cls, transform, transform_post, noise_transforms,
     return learn_loaders, score_loaders, train, tests
 
 
+def toy(**kwargs) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader], Dict[str, Any]]:
+    x_dim = 2
+    learn_loaders, score_loaders, train, tests = get_dataset(dataset_cls=ToyRecall, **kwargs)
+    classes = ('one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight')
+    info = {'classes': classes, 'train': train, 'test': tests, 'x_dim': x_dim}
+    return learn_loaders, score_loaders, info
+
+
 def cifar10(**kwargs) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader], Dict[str, Any]]:
     x_dim = 3 * 32 * 32
     learn_loaders, score_loaders, train, tests = get_dataset(dataset_cls=CIFAR10Recall, **kwargs)
@@ -287,7 +316,9 @@ def dataset_dispatcher(args):
                         noise_transforms=noise_transforms, data_size=data_size,
                         learn_batch_size=learn_batch_size, score_batch_size=score_batch_size,
                         data_start_index=data_start_index)
-    if args.dataset == 'cifar10':
+    if args.dataset == 'toy':
+        return toy(**dataset_args)
+    elif args.dataset == 'cifar10':
         return cifar10(**dataset_args)
     elif args.dataset == 'tinyimagenet':
         dataset_args['max_samples'] = data_size

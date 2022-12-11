@@ -175,9 +175,9 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
             # Plot mean L1 norms of the first PCNet parameters
             norm_info = dict()
             for i_layer, layer in enumerate(model._pcnets[0].layers):
-                norm_info[f"layer{i_layer+1}_R_avg_norm"] = layer._R.abs().mean().item()
-                norm_info[f"layer{i_layer+1}_U_avg_norm"] = layer._U.abs().mean().item()
-                norm_info[f"layer{i_layer+1}_U_avg_diag_norm"] = layer._U.diag().abs().mean().item()
+                norm_info[f"layer{i_layer+1}_R_avg_norm"] = layer.param_norm(name="R")
+                norm_info[f"layer{i_layer+1}_U_avg_norm"] = layer.param_norm(name="U")
+                norm_info[f"layer{i_layer+1}_U_avg_diag_norm"] = layer.param_norm(name="U_diag")
             wandb_dict.update(norm_info)
 
             # Log to wandb
@@ -236,7 +236,8 @@ def model_dispatcher(args: Dict[str, Any], dataset_info: Dict[str, Any]) -> PCNe
                          layer_update_strat=args.layer_update_strat,
                          ensemble_log_joint_strat=args.ensemble_log_joint_strat,
                          ensemble_proposal_strat=args.ensemble_proposal_strat,
-                         scale_layer=args.scale_layer, resample=args.resample,
+                         top_layer_type=args.top_layer_type, n_components=args.n_components,
+                         K=args.K, scale_layer=args.scale_layer, resample=args.resample,
                          weight_lr=args.weight_lr, beta_forget=args.beta_forget,
                          beta_noise=args.beta_noise, mhn_metric=args.mhn_metric, bias=args.bias,
                          n_elbo_particles=args.n_elbo_particles, kernel_type=args.kernel_type)

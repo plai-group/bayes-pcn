@@ -54,6 +54,11 @@ class ActInitStrat(ArgParseEnum):
     RANDNPLUS = 'randnplus'  # Initialize hidden activation values to truncated kaiming normal
 
 
+class TopLayer(ArgParseEnum):
+    GAUSSIAN = 'gaussian'  # Initialize hidden activation values to self._h_dim ** -0.5
+    KWAYGMM = 'kwaygmm'    # Initialize hidden activation values to kaiming normal samples
+
+
 class WeightInitStrat(ArgParseEnum):
     FIXED = 'fixed'  # Initialize hidden activation values to zeroes
     RANDN = 'randn'  # Initialize network weight means to kaiming normal samples

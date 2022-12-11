@@ -61,9 +61,14 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument('--ensemble-proposal-strat', type=EnsembleProposalStrat,
                         default=EnsembleProposalStrat.MODE,
                         choices=list(EnsembleProposalStrat))
+    parser.add_argument('--top-layer-type', type=TopLayer,
+                        default=TopLayer.GAUSSIAN, choices=list(TopLayer))
     parser.add_argument('--mhn-metric', type=MHNMetric,
                         default=MHNMetric.DOT, choices=list(MHNMetric))
     parser.add_argument('--kernel-type', type=Kernel, default=Kernel.RBF, choices=list(Kernel))
+    parser.add_argument('--K', type=int, default=4, help='specify if --top-layer-type=="kwaygmm".')
+    parser.add_argument('--n-components', type=int, default=16,
+                        help='specify if --top-layer-type=="kwaygmm".')
 
     # data configs
     parser.add_argument('--dataset', type=str, choices=['cifar10', 'tinyimagenet', 'flickr30k'],

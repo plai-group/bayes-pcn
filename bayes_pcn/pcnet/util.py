@@ -55,3 +55,73 @@ def fixed_indices_exists(fixed_indices: torch.Tensor) -> bool:
 
 def normalize(X_in: torch.Tensor) -> torch.Tensor:
     return X_in / torch.norm(X_in, p=2, dim=-1, keepdim=True)
+
+
+def gmm_log_joint(X: torch.Tensor, pi: torch.Tensor, sigma_obs: float,
+                  R: torch.Tensor, U: torch.Tensor = None) -> torch.Tensor:
+    """Calculate the log joint over the data matrix.
+
+    Args:
+        X (torch.Tensor): Data matrix of shape <d_batch x d_features>.
+        pi (torch.Tensor): Component probability vector of shape <n_components>.
+        sigma_obs (float): Observation standard deviation.
+        R (torch.Tensor): Mean matrix of shape <n_components x d_features>.
+        U (torch.Tensor, optional): Diagonal covariance matrix of shape
+                                    <n_components x n_components>.
+                                    Should only be provided if using Bayesian GMM.
+
+    Returns:
+        torch.Tensor: Log joint matrix of shape <d_batch x n_components>.
+    """
+    n_components, (d_batch, d_features) = len(pi), X.shape
+    X = X.T.repeat(n_components, 1, 1)    # <n_components x d_features x d_batch>
+    log_pi = pi.unsqueeze(-1).repeat(1, d_batch).log()  # <n_components x d_batch>
+    R = R.unsqueeze(-1)                   # <n_components x d_features x 1>
+    component_sigmas = torch.ones_like(R) * sigma_obs
+    if U is not None:
+        prior_Sigmas = U.diag().unsqueeze(-1).repeat(1, d_features).unsqueeze(-1)
+        component_sigmas = (component_sigmas**2 + prior_Sigmas)**0.5
+    component_log_probs = dists.Normal(loc=R, scale=component_sigmas).log_prob(X)
+    component_log_probs = component_log_probs.sum(dim=1)  # <n_components x d_batch>
+    return (log_pi + component_log_probs).T
+
+
+def gmm_log_marginal(X: torch.Tensor, pi: torch.Tensor, sigma_obs: float,
+                     R: torch.Tensor, U: torch.Tensor = None) -> torch.Tensor:
+    """Calculate the marginal log likelihood of the data matrix.
+
+    Args:
+        X (torch.Tensor): Data matrix of shape <d_batch x d_features>.
+        pi (torch.Tensor): Component probability vector of shape <n_components>.
+        sigma_obs (float): Observation standard deviation.
+        R (torch.Tensor): Mean matrix of shape <n_components x d_features>.
+        U (torch.Tensor, optional): Diagonal covariance matrix of shape
+                                    <n_components x n_components>.
+                                    Should only be provided if using Bayesian GMM.
+
+    Returns:
+        torch.Tensor: Log marginal vector of shape <d_batch>.
+    """
+    log_joint = gmm_log_joint(X=X, pi=pi, sigma_obs=sigma_obs, R=R, U=U)
+    return torch.logsumexp(log_joint, dim=-1)
+
+
+def gmm_log_posterior(X: torch.Tensor, pi: torch.Tensor, sigma_obs: float,
+                      R: torch.Tensor, U: torch.Tensor = None) -> torch.Tensor:
+    """Calculate the log posterior over the component indices.
+
+    Args:
+        X (torch.Tensor): Data matrix of shape <d_batch x d_features>.
+        pi (torch.Tensor): Component probability vector of shape <n_components>.
+        sigma_obs (float): Observation standard deviation.
+        R (torch.Tensor): Mean matrix of shape <n_components x d_features>.
+        U (torch.Tensor, optional): Diagonal covariance matrix of shape
+                                    <n_components x n_components>.
+                                    Should only be provided if using Bayesian GMM.
+
+    Returns:
+        torch.Tensor: Log posterior matrix of shape <d_batch x n_components>.
+    """
+    log_joint = gmm_log_joint(X=X, pi=pi, sigma_obs=sigma_obs, R=R, U=U)
+    log_marginal = torch.logsumexp(log_joint, dim=-1, keepdim=True)
+    return log_joint - log_marginal

@@ -4,7 +4,7 @@ from typing import List, Tuple
 
 from bayes_pcn.const import *
 from .activations import ActivationGroup
-from .layers import AbstractPCLayer, PCLayer, PCTopLayer
+from .layers import AbstractPCLayer, PCLayer, GaussianLayer, KWayGMMLayer
 from .structs import *
 from .util import *
 
@@ -12,11 +12,12 @@ from .util import *
 class PCNet:
     def __init__(self, n_layers: int, x_dim: int, h_dim: int, act_fn: ActFn,
                  sigma_prior: float, sigma_obs: float, sigma_data: float,
-                 scale_layer: bool, **kwargs) -> None:
+                 scale_layer: bool, top_layer_type: TopLayer, **kwargs) -> None:
         self._layers = self._init_layers(n_layers=n_layers, x_dim=x_dim, d_h=h_dim,
                                          sigma_prior=sigma_prior, sigma_obs=sigma_obs,
                                          sigma_data=sigma_data, act_fn=act_fn,
-                                         scale_layer=scale_layer, **kwargs)
+                                         scale_layer=scale_layer, top_layer_type=top_layer_type,
+                                         **kwargs)
         self.layer_log_prob_strat = None
         self.layer_sample_strat = None
         self.layer_update_strat = None
@@ -97,12 +98,19 @@ class PCNet:
 
     def _init_layers(self, n_layers: int, x_dim: int, d_h: int, sigma_prior: float,
                      sigma_obs: float, sigma_data: float, act_fn: ActFn, scale_layer: bool,
-                     **kwargs) -> List[AbstractPCLayer]:
+                     top_layer_type: TopLayer, **kwargs) -> List[AbstractPCLayer]:
         sigma_obs_l0 = sigma_obs if sigma_data is None else sigma_data
         bias = kwargs.pop('bias')
+        if top_layer_type == TopLayer.GAUSSIAN:
+            top_layer_cls = GaussianLayer
+            top_layer_args = dict(sigma_prior=sigma_prior, sigma_obs=sigma_obs, **kwargs)
+        elif top_layer_type == TopLayer.KWAYGMM:
+            top_layer_cls = KWayGMMLayer
+            top_layer_args = dict(sigma_prior=sigma_prior, sigma_obs=sigma_obs, **kwargs)
+        else:
+            raise NotImplementedError()
         if n_layers == 1:
-            return [PCTopLayer(d_out=x_dim, sigma_prior=sigma_prior,
-                               sigma_obs=sigma_obs_l0, layer_index=0, **kwargs)]
+            return [top_layer_cls(layer_index=0, d_out=x_dim, **top_layer_args)]
 
         layers = [PCLayer(d_in=d_h, d_out=x_dim, act_fn=act_fn, sigma_prior=sigma_prior,
                           sigma_obs=sigma_obs_l0, scale_layer=scale_layer, layer_index=0,
@@ -111,8 +119,7 @@ class PCNet:
             layers.append(PCLayer(d_in=d_h, d_out=d_h, act_fn=act_fn, scale_layer=scale_layer,
                                   sigma_prior=sigma_prior, sigma_obs=sigma_obs, layer_index=i,
                                   bias=bias, **kwargs))
-        layers.append(PCTopLayer(d_out=d_h, sigma_prior=sigma_prior, sigma_obs=sigma_obs,
-                                 layer_index=n_layers-1, **kwargs))
+        layers.append(top_layer_cls(layer_index=n_layers-1, d_out=d_h, **top_layer_args))
         return layers
 
     @property

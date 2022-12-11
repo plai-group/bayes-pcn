@@ -17,7 +17,8 @@ class PCNetEnsemble:
                  sigma_data: float, activation_optim: str, n_proposal_samples: int,
                  activation_init_strat: str, weight_init_strat: str, layer_log_prob_strat: str,
                  layer_sample_strat: str, layer_update_strat: str, ensemble_log_joint_strat: str,
-                 ensemble_proposal_strat: str, scale_layer: bool, **kwargs) -> None:
+                 ensemble_proposal_strat: str, top_layer_type: str, scale_layer: bool, **kwargs
+                 ) -> None:
         self._n_models: int = n_models
         self._n_layers: int = n_layers
         self._x_dim: int = x_dim
@@ -33,12 +34,14 @@ class PCNetEnsemble:
         self._beta_forget = kwargs.get('beta_forget')
         self._n_elbo_particles = kwargs.get('n_elbo_particles')
         act_fn = ActFn.get_enum_from_value(act_fn)
+        top_layer_type = TopLayer.get_enum_from_value(top_layer_type)
         kernel_type = Kernel.get_enum_from_value(kwargs.get('kernel_type'))
         self.weight_init_strat = WeightInitStrat.get_enum_from_value(weight_init_strat)
 
         base_models_init_args = dict(weight_init_strat=self.weight_init_strat, act_fn=act_fn,
-                                     n_models=n_models, bias=kwargs.get('bias'),
-                                     kernel_type=kernel_type)
+                                     n_models=n_models, top_layer_type=top_layer_type,
+                                     kernel_type=kernel_type, bias=kwargs.get('bias'),
+                                     K=kwargs.get('K'), n_components=kwargs.get('n_components'))
         if LayerUpdateStrat.get_enum_from_value(layer_update_strat) == LayerUpdateStrat.MHN:
             # HACK: Makes MHN memory efficient
             base_models_init_args['economy_mode'] = True
@@ -256,11 +259,12 @@ class PCNetEnsemble:
         log_joint = self.log_joint(a_group=a_group).log_prob
         return Sample(data=data, log_joint=log_joint)
 
-    def _initialize_base_models(self, n_models: int, act_fn: ActFn, **kwargs) -> List[PCNet]:
+    def _initialize_base_models(self, n_models: int, act_fn: ActFn, top_layer_type: TopLayer,
+                                **kwargs) -> List[PCNet]:
         return [PCNet(n_layers=self._n_layers, x_dim=self._x_dim, h_dim=self._h_dim,
                       sigma_prior=self._sigma_prior, sigma_obs=self._sigma_obs,
                       sigma_data=self._sigma_data, act_fn=act_fn, scale_layer=self._scale_layer,
-                      **kwargs)
+                      top_layer_type=top_layer_type, **kwargs)
                 for _ in range(n_models)]
 
     @property
