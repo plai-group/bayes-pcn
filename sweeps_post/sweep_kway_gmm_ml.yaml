@@ -1,0 +1,56 @@
+project: "bayes-pcn-ml"
+program: -mbayes_pcn
+method: grid
+parameters:
+  K:
+    values: [1, 4, 16]
+  n-components:
+    values: [2, 8, 32]
+  sigma-top:
+    values: [0.01, 0.05]
+  sigma-prior:
+    values: [1., 0.1]
+  n-data:
+    values: [128, 1024]
+  top-layer-type:
+    value: "kwaygmm"
+  h-dim:
+    value: 1024
+  act-fn:
+    value: "gelu"
+  seed:
+    value: 0
+  n-layers:
+    value: 4
+  n-epoch:
+    value: 4000
+  sigma-obs:
+    value: 0.01
+  sigma-data:
+    value: 0.01
+  layer-log-prob-strat:
+    value: "map"
+  run-group:
+    value: "kway-ml-cifar"
+  wandb-mode:
+    value: "online"
+  activation-lr:
+    value: 0.01
+  weight-lr:
+    value: 0.0001
+  layer-sample-strat:
+    value: "map"
+  layer-update-strat:
+    value: "ml"
+  dataset:
+    value: "cifar10"
+  dataset-mode:
+    value: "all"
+  T-infer:
+    value: 500
+  n-models:
+    value: 1
+  log-every-epoch:
+    value: 100
+  log-every:
+    value: 2
