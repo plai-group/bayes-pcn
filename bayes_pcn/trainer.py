@@ -143,7 +143,7 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
                                                   acc_thresh=acc_thresh, n_repeat=n_repeat,
                                                   prefix='unseen')
             wandb_dict.update(result)
-            unseen_img = plot_data_batch(data_batch=pred_batch)
+            unseen_img = plot_data_batch(data_batch=pred_batch, data_type=args['data_type'])
 
         # Update model
         X_train = curr_batch.train[0]
@@ -155,7 +155,7 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
                                                   acc_thresh=acc_thresh, n_repeat=n_repeat,
                                                   prefix='initial')
             wandb_dict.update(result)
-            init_img = plot_data_batch(data_batch=pred_batch)
+            init_img = plot_data_batch(data_batch=pred_batch, data_type=args['data_type'])
 
         if should_log(index=i):
             # Evaluate model performance on the current data batches after update
@@ -163,7 +163,7 @@ def train_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
                                                   acc_thresh=acc_thresh, n_repeat=n_repeat,
                                                   prefix='current')
             wandb_dict.update(result)
-            curr_img = plot_data_batch(data_batch=pred_batch)
+            curr_img = plot_data_batch(data_batch=pred_batch, data_type=args['data_type'])
             # Generate data samples and plot log loss trajectory
             gen_img = generate_samples(model=model, X_shape=X_shape, d_batch=8,
                                        caption="Model samples via ancestral sampling.")
@@ -227,7 +227,7 @@ def model_dispatcher(args: Dict[str, Any], dataset_info: Dict[str, Any]) -> PCNe
                          x_dim=dataset_info.get('x_dim'), act_fn=args.act_fn, infer_T=args.T_infer,
                          infer_lr=args.activation_lr, sigma_prior=args.sigma_prior,
                          sigma_obs=args.sigma_obs, sigma_data=args.sigma_data,
-                         n_proposal_samples=args.n_proposal_samples,
+                         sigma_top=args.sigma_top, n_proposal_samples=args.n_proposal_samples,
                          activation_optim=args.activation_optim,
                          activation_init_strat=args.activation_init_strat,
                          weight_init_strat=args.weight_init_strat,

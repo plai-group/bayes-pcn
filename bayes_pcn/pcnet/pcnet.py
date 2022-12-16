@@ -11,13 +11,13 @@ from .util import *
 
 class PCNet:
     def __init__(self, n_layers: int, x_dim: int, h_dim: int, act_fn: ActFn,
-                 sigma_prior: float, sigma_obs: float, sigma_data: float,
+                 sigma_prior: float, sigma_obs: float, sigma_data: float, sigma_top: float,
                  scale_layer: bool, top_layer_type: TopLayer, **kwargs) -> None:
         self._layers = self._init_layers(n_layers=n_layers, x_dim=x_dim, d_h=h_dim,
                                          sigma_prior=sigma_prior, sigma_obs=sigma_obs,
-                                         sigma_data=sigma_data, act_fn=act_fn,
-                                         scale_layer=scale_layer, top_layer_type=top_layer_type,
-                                         **kwargs)
+                                         sigma_data=sigma_data, sigma_top=sigma_top,
+                                         act_fn=act_fn, scale_layer=scale_layer,
+                                         top_layer_type=top_layer_type, **kwargs)
         self.layer_log_prob_strat = None
         self.layer_sample_strat = None
         self.layer_update_strat = None
@@ -97,19 +97,17 @@ class PCNet:
             layer.bayes_forget(beta_forget=beta_forget)
 
     def _init_layers(self, n_layers: int, x_dim: int, d_h: int, sigma_prior: float,
-                     sigma_obs: float, sigma_data: float, act_fn: ActFn, scale_layer: bool,
-                     top_layer_type: TopLayer, **kwargs) -> List[AbstractPCLayer]:
+                     sigma_obs: float, sigma_data: float, sigma_top: float, act_fn: ActFn,
+                     scale_layer: bool, top_layer_type: TopLayer, **kwargs
+                     ) -> List[AbstractPCLayer]:
         sigma_obs_l0 = sigma_obs if sigma_data is None else sigma_data
+        sigma_obs_top = sigma_obs if sigma_top is None else sigma_top
         bias = kwargs.pop('bias')
-        if top_layer_type == TopLayer.GAUSSIAN:
-            top_layer_cls = GaussianLayer
-            top_layer_args = dict(sigma_prior=sigma_prior, sigma_obs=sigma_obs, **kwargs)
-        elif top_layer_type == TopLayer.KWAYGMM:
-            top_layer_cls = KWayGMMLayer
-            top_layer_args = dict(sigma_prior=sigma_prior, sigma_obs=sigma_obs, **kwargs)
-        else:
-            raise NotImplementedError()
+        top_layer_cls = GaussianLayer if top_layer_type == TopLayer.GAUSSIAN else KWayGMMLayer
+        top_layer_args = dict(sigma_prior=sigma_prior, sigma_obs=sigma_obs_top, **kwargs)
+
         if n_layers == 1:
+            top_layer_args['sigma_obs'] = sigma_obs_l0
             return [top_layer_cls(layer_index=0, d_out=x_dim, **top_layer_args)]
 
         layers = [PCLayer(d_in=d_h, d_out=x_dim, act_fn=act_fn, sigma_prior=sigma_prior,

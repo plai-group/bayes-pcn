@@ -82,9 +82,15 @@ class Kernel(ArgParseEnum):
 
 
 class Dataset(ArgParseEnum):
+    TOY = 'toy'
     CIFAR10 = 'cifar10'
     TINYIMAGENET = 'tinyimagenet'
     FLICKR30K = 'flickr30k'
+
+
+class DataType(ArgParseEnum):
+    TOY = 'toy'
+    IMAGE = 'image'
 
 
 class DatasetMode(ArgParseEnum):

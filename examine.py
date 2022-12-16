@@ -41,7 +41,7 @@ def compare_cifar(path, index, n_repeat, dataset_mode):
     result, pred_batch = score_data_batch(data_batch=data_batch, model=model,
                                           acc_thresh=0.005, n_repeat=n_repeat)
     result = {k: round(v, 5) for k, v in result.items()}
-    batch_img = plot_data_batch(data_batch=pred_batch)
+    batch_img = plot_data_batch(data_batch=pred_batch, data_type=args['data_type'])
     print(json.dumps(result, sort_keys=True, indent=4))
     batch_img.image.show()
     gen_img = generate_samples(model=model, X_shape=data_batch.original_shape, d_batch=8)

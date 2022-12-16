@@ -562,6 +562,7 @@ class KWayGMMLayer(AbstractPCLayer):
         self._update_strat: LayerUpdateStrat = None
         self._device = torch.device('cpu')
         self._weight_lr = kwargs.get('weight_lr', None)
+        self._sigma_prior = sigma_prior
 
         # Initialize K GMM parameters
         self._params = []
@@ -574,6 +575,7 @@ class KWayGMMLayer(AbstractPCLayer):
             else:
                 R = torch.empty(n_components, self._d_out_gmm)
                 torch.nn.init.normal_(R, 0, self._d_out_gmm**-0.5)
+                # torch.nn.init.uniform_(R, -self._d_out_gmm**-0.5, self._d_out_gmm**-0.5)
             # Matrix normal prior covariance matrix of shape <n_components x n_components>
             U = torch.eye(n_components) * sigma_prior ** 2
             self._params.append(dict(pi=pi, R=R, U=U, z=None))
@@ -642,6 +644,31 @@ class KWayGMMLayer(AbstractPCLayer):
         sample = marginal_mean + pyro.sample(self._name, dist, obs=obs)
         return sample
 
+    def _mhn_update(self, X_obs: torch.Tensor, **kwargs) -> None:
+        # NOTE: Not called anywhere yet
+        # Try adding components as observations are made, and increment self._n_components
+        # Should support both individual and batch observation udpates
+        d_batch, n_components = len(X_obs), self._n_components
+        n_components_new = self._n_components + d_batch
+        for k in range(self._K):
+            params = self._params[k]
+            pi, R, U = params["pi"], params["R"], params["U"]
+            X = X_obs[:, k*self._d_out_gmm:(k+1)*self._d_out_gmm]
+            log_posterior = gmm_log_posterior(X=X, pi=pi, sigma_obs=self._Sigma**0.5, R=R, U=U)
+            params["R"] = torch.softmax(log_posterior, dim=0).T.matmul(X)
+
+            old_mass, new_mass = self._n_components/n_components_new, d_batch/n_components_new
+            old_pi, new_pi = pi*old_mass, torch.ones(d_batch).to(pi.device)/d_batch*new_mass
+            pi_new = torch.cat((old_pi, new_pi), dim=0)
+            R_new = torch.stack((R, X_obs), dim=0).to(R.device)
+            if U is None:
+                U_new = None
+            else:
+                U_new = torch.eye(n_components_new).to(U.device) * self._sigma_prior
+                U_new[:n_components, :n_components] = U
+            self._params[k] = dict(pi=pi_new, R=R_new, U=U_new, z=None)
+        self._n_components += d_batch
+
     def _ml_update(self, X_obs: torch.Tensor, **kwargs) -> None:
         """Expectation maximization of self._R given X_obs.
         Reference: https://en.wikipedia.org/wiki/EM_algorithm_and_GMM_model
@@ -672,6 +699,7 @@ class KWayGMMLayer(AbstractPCLayer):
             X = X_obs[:, k*self._d_out_gmm:(k+1)*self._d_out_gmm]
             Z_in = torch.zeros(self._n_components).to(X_obs.device)
             Z_in[gmm_log_posterior(X=X, pi=pi, sigma_obs=self._Sigma**0.5, R=R, U=U).argmax()] = 1.
+            print(gmm_log_posterior(X=X, pi=pi, sigma_obs=self._Sigma**0.5, R=R, U=U).argmax())
 
             Sigma_c = Z_in.unsqueeze(0).matmul(U)
             Sigma_obs = self._Sigma * torch.eye(d_batch).to(self.device)

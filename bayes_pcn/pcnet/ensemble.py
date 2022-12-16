@@ -14,11 +14,11 @@ from .util import *
 class PCNetEnsemble:
     def __init__(self, n_models: int, n_layers: int, x_dim: int, h_dim: int, act_fn: ActFn,
                  infer_T: int, infer_lr: float, sigma_prior: float, sigma_obs: float,
-                 sigma_data: float, activation_optim: str, n_proposal_samples: int,
-                 activation_init_strat: str, weight_init_strat: str, layer_log_prob_strat: str,
-                 layer_sample_strat: str, layer_update_strat: str, ensemble_log_joint_strat: str,
-                 ensemble_proposal_strat: str, top_layer_type: str, scale_layer: bool, **kwargs
-                 ) -> None:
+                 sigma_data: float, sigma_top: float, activation_optim: str,
+                 n_proposal_samples: int, activation_init_strat: str, weight_init_strat: str,
+                 layer_log_prob_strat: str, layer_sample_strat: str, layer_update_strat: str,
+                 ensemble_log_joint_strat: str, ensemble_proposal_strat: str, top_layer_type: str,
+                 scale_layer: bool, **kwargs) -> None:
         self._n_models: int = n_models
         self._n_layers: int = n_layers
         self._x_dim: int = x_dim
@@ -28,6 +28,7 @@ class PCNetEnsemble:
         self._sigma_prior: float = sigma_prior
         self._sigma_obs: float = sigma_obs
         self._sigma_data: float = sigma_data
+        self._sigma_top: float = sigma_top
         self._scale_layer: bool = scale_layer
         self._activation_optim: str = activation_optim
         self._log_weights: torch.Tensor = (torch.ones(self._n_models) / self._n_models).log()
@@ -263,8 +264,8 @@ class PCNetEnsemble:
                                 **kwargs) -> List[PCNet]:
         return [PCNet(n_layers=self._n_layers, x_dim=self._x_dim, h_dim=self._h_dim,
                       sigma_prior=self._sigma_prior, sigma_obs=self._sigma_obs,
-                      sigma_data=self._sigma_data, act_fn=act_fn, scale_layer=self._scale_layer,
-                      top_layer_type=top_layer_type, **kwargs)
+                      sigma_data=self._sigma_data, sigma_top=self._sigma_top, act_fn=act_fn,
+                      scale_layer=self._scale_layer, top_layer_type=top_layer_type, **kwargs)
                 for _ in range(n_models)]
 
     @property

@@ -42,8 +42,8 @@ def get_parser() -> argparse.ArgumentParser:
 
 
 def score_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], model: PCNetEnsemble,
-                acc_thresh: float, epoch: int, n_repeat: int, fast_mode: bool, save_dir: str
-                ) -> Dict[str, float]:
+                acc_thresh: float, epoch: int, n_repeat: int, fast_mode: bool, save_dir: str,
+                data_type: str) -> Dict[str, float]:
     train_loader = iter(train_loader)
     test_loaders = {name: iter(test_loader) for name, test_loader in test_loaders.items()}
 
@@ -56,7 +56,7 @@ def score_epoch(train_loader: DataLoader, test_loaders: Dict[str, DataLoader], m
                                               acc_thresh=acc_thresh, n_repeat=n_repeat)
         individual_scores.append(pred_batch.info["all_mses"])
         if not fast_mode:
-            recall_img = plot_data_batch(data_batch=pred_batch)
+            recall_img = plot_data_batch(data_batch=pred_batch, data_type=data_type)
             wandb_dict = {"z_step": i, **result}
             wandb_dict = {f"iteration/{k}": v for k, v in wandb_dict.items()}
             wandb_dict["Recalled Image"] = recall_img
@@ -135,7 +135,7 @@ def main():
     result_dict = score_epoch(train_loader=train_loader, test_loaders=test_loaders,
                               epoch=1, model=model, acc_thresh=loaded_args.acc_thresh,
                               n_repeat=loaded_args.n_repeat, fast_mode=args.fast_mode,
-                              save_dir=save_dir)
+                              save_dir=save_dir, data_type=loaded_args.get('data_type'))
     save_dict = {**loaded_args, **result_dict}
     save_result(result=save_dict, path=f"{save_dir}/score.csv", overwrite=False)
 

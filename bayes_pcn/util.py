@@ -13,6 +13,7 @@ import torchvision
 from typing import Dict, List
 import wandb
 
+from bayes_pcn.const import DataType
 from bayes_pcn.pcnet.structs import DataBatch, UpdateResult
 from bayes_pcn.pcnet.ensemble import PCNetEnsemble
 
@@ -123,7 +124,7 @@ def get_next_data_batch(train_loader: DataLoader, test_loaders: Dict[str, DataLo
     return DataBatch(train=(X, None), tests=test_batch, original_shape=X_shape)
 
 
-def plot_data_batch(data_batch: DataBatch, caption: str = None) -> wandb.Image:
+def plot_data_batch(data_batch: DataBatch, data_type: str, caption: str = None) -> wandb.Image:
     """Plot the first image in the batch under various transformations.
 
     Args:
@@ -133,6 +134,37 @@ def plot_data_batch(data_batch: DataBatch, caption: str = None) -> wandb.Image:
     Returns:
         wandb.Image: _description_
     """
+    if data_type == DataType.TOY.value:
+        return plot_2d_batch(data_batch=data_batch, caption=caption)
+    elif data_type == DataType.IMAGE.value:
+        return plot_image_batch(data_batch=data_batch, caption=caption)
+    else:
+        raise NotImplementedError()
+
+
+def plot_2d_batch(data_batch: DataBatch, caption: str = None) -> wandb.Image:
+    labels = ['train'] + [k for k in data_batch.tests.keys()]
+    queries = [data_batch.train[0]] + [v[0] for v in data_batch.tests.values()]
+    preds = [data_batch.train_pred[0]] + [v[0] for v in data_batch.tests_pred.values()]
+    truths = [data_batch.train[0]] * 4
+    fig, ax = plt.subplots(ncols=len(labels), nrows=1, squeeze=True,
+                           sharex=True, sharey=True, figsize=(12, 3))
+    for i, (label, query, pred, truth) in enumerate(zip(labels, queries, preds, truths)):
+        ax_obj = ax[i]
+        ax_obj.set_title(f"{label}")
+        ax_obj.scatter(query[:, 0], query[:, 1], marker="o", c="gray", label="query")
+        ax_obj.scatter(pred[:, 0], pred[:, 1], marker="*", c="blue", label="pred")
+        ax_obj.scatter(truth[:, 0], truth[:, 1], marker="x", c="red", label="truth")
+    handles, labels = ax[-1].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='lower right', ncol=len(labels))
+    fig.suptitle = "Energy vs Gradient Descent Iteration"
+    fig.tight_layout()
+    img = fig2img(fig=fig, caption=caption)
+    # plt.close(fig)
+    return img
+
+
+def plot_image_batch(data_batch: DataBatch, caption: str = None) -> wandb.Image:
     rows = [None] * (1 + len(data_batch.tests)) * 2
     X_shape = data_batch.original_shape
     rows[0] = data_batch.train[0][:1].reshape(X_shape[1:])
@@ -183,6 +215,7 @@ def plot_energy_trajectory(all_mean_losses: List[List[float]], all_min_losses: L
 
 def plot_test_trajectories(data_batch: DataBatch) -> Dict[str, wandb.Image]:
     # For each train and test data batches, plot the activation gradient descent energy trajectory.
+    # NOTE: Only plots hidden layer energies unless no hidden layers exist.
     result = dict()
     for name, content in data_batch.info.items():
         if not ('train' in name or 'test' in name):
@@ -191,6 +224,9 @@ def plot_test_trajectories(data_batch: DataBatch) -> Dict[str, wandb.Image]:
         sorted_keys = sorted(repeat_keys, key=lambda k: int(k.split('_')[-1]))
         first_repeat = content[sorted_keys[0]]['hidden']
         last_repeat = content[sorted_keys[-1]]['hidden']
+        if first_repeat is None or last_repeat is None:
+            first_repeat = content[sorted_keys[0]]['obs']
+            last_repeat = content[sorted_keys[-1]]['obs']
         if len(sorted_keys) == 1:
             kwargs = dict(all_mean_losses=[first_repeat['mean_losses']],
                           all_min_losses=[first_repeat['min_losses']],
@@ -246,7 +282,13 @@ def plot_layerwise_update_energy(update_result: UpdateResult,
         List[wandb.Image]: A list of Weights and Biases images detailing the plot.
     """
     update_info = update_result.info
-    layerwise_mean_losses = update_info[list(update_info.keys())[0]]['layerwise_mean_losses']
+    first_model_info = update_info[list(update_info.keys())[0]]
+    layerwise_mean_losses = first_model_info.get('layerwise_mean_losses,', None)
+    if layerwise_mean_losses is None:
+        # If layerwise mean loss is not available, just return an empty plot
+        fig, ax = plt.subplots(ncols=1, nrows=1, squeeze=False, sharex=True, sharey=True)
+        fig.tight_layout()
+        return [fig2img(fig=fig, caption="not available")]
     n_iter, n_layer = len(layerwise_mean_losses), len(layerwise_mean_losses[0])
 
     imgs = []

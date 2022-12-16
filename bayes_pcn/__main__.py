@@ -36,6 +36,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument('--sigma-prior', type=float, default=1.)
     parser.add_argument('--sigma-obs', type=float, default=0.01)
     parser.add_argument('--sigma-data', type=float, default=None)
+    parser.add_argument('--sigma-top', type=float, default=None)
     parser.add_argument('--beta-forget', type=float, default=0., help='between 0-1. 0 = no forget.')
     parser.add_argument('--beta-noise', type=float, default=0.1,
                         help='diffusion rate when using --layer-update-strat=noising.')
@@ -71,8 +72,7 @@ def get_parser() -> argparse.ArgumentParser:
                         help='specify if --top-layer-type=="kwaygmm".')
 
     # data configs
-    parser.add_argument('--dataset', type=str, choices=['cifar10', 'tinyimagenet', 'flickr30k'],
-                        default='cifar10')
+    parser.add_argument('--dataset', type=Dataset, choices=list(Dataset), default=Dataset.CIFAR10)
     parser.add_argument('--dataset-mode', type=str, default='fast',
                         choices=['fast', 'mix', 'white', 'drop', 'mask', 'all'],
                         help='Specifies test dataset configuration.')
@@ -190,6 +190,7 @@ def main():
     if args.cuda and torch.cuda.device_count() > 0:
         model.device = torch.device('cuda')
 
+    args['data_type'] = dataset_info['type']
     result = run(learn_loaders=learn_loaders, score_loaders=score_loaders, config=config)
     save_result(result=result, path=f"{args.path}/train.csv")
 

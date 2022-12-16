@@ -9,6 +9,8 @@ import torchvision.transforms as transforms
 from typing import Dict, Tuple, Any, Optional, Callable
 
 
+from bayes_pcn.const import DataType
+from bayes_pcn.const import Dataset as DatasetConst
 from .tin import TinyImageNetDataset
 
 
@@ -75,13 +77,37 @@ class ToyRecall(Dataset):
             transform (callable, optional): Optional transform to be applied
                 on a sample.
         """
-        raise NotImplementedError()
+        # self.points = torch.tensor((
+        #     (-1.0, -1.0), (-1.0, -0.5), (-1.0, 0.5), (-1.0, 1.0),
+        #     (-0.5, -1.0), (-0.5, -0.5), (-0.5, 0.5), (-0.5, 1.0),
+        #     (0.5, -1.0), (0.5, -0.5), (0.5, 0.5), (0.5, 1.0),
+        #     (1.0, -1.0), (1.0, -0.5), (1.0, 0.5), (1.0, 1.0),
+        # ))
+        self.points = torch.tensor((
+            (-1.0, -1.0), (-0.5, 0.5), (0.5, -0.5), (1.0, 1.0),
+        ))
+        self.transform = transform
+        self.noise_transform = noise_transform
+        self.transform_post = transform_post
 
     def __len__(self):
-        raise NotImplementedError()
+        return len(self.points)
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
-        raise NotImplementedError()
+        data = self.points[index]
+
+        if self.transform is not None:
+            data = self.transform(data)
+
+        if self.noise_transform is not None:
+            data, fixed_indices = self.noise_transform(data)
+        else:
+            fixed_indices = torch.zeros(data.shape)
+
+        if self.transform_post is not None:
+            data = self.transform_post(data)
+
+        return data, fixed_indices
 
 
 class CIFAR10Recall(datasets.CIFAR10):
@@ -202,10 +228,16 @@ def separate_train_test(loaders: Dict[str, DataLoader]) -> Tuple[DataLoader, Dic
     return train_loader, test_loaders
 
 
-def get_transforms(config: str):
+def get_transforms(config: str, dataset: str = None):
     # Image preprocessing logic
     transform = transforms.Compose([transforms.ToTensor()])
     transform_post = transforms.Compose([transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    if dataset == 'toy':
+        # Dataset is 2D so noise levels have to be set carefully
+        return None, None, {'white0.1': WhiteNoise(var=0.1**2),
+                            'drop0.50': DropoutNoise(p=0.5, n_channels=0),
+                            'mask0.50': MaskingNoise(p=0.5, n_channels=0)}
+
     if config == 'fast':
         noise_transforms = {'mask0.25': MaskingNoise(p=0.25)}
     elif config == 'mix':
@@ -267,8 +299,7 @@ def get_dataset(dataset_cls, transform, transform_post, noise_transforms,
 def toy(**kwargs) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader], Dict[str, Any]]:
     x_dim = 2
     learn_loaders, score_loaders, train, tests = get_dataset(dataset_cls=ToyRecall, **kwargs)
-    classes = ('one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight')
-    info = {'classes': classes, 'train': train, 'test': tests, 'x_dim': x_dim}
+    info = {'train': train, 'test': tests, 'x_dim': x_dim, 'type': DataType.TOY.value}
     return learn_loaders, score_loaders, info
 
 
@@ -276,7 +307,8 @@ def cifar10(**kwargs) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader], Dic
     x_dim = 3 * 32 * 32
     learn_loaders, score_loaders, train, tests = get_dataset(dataset_cls=CIFAR10Recall, **kwargs)
     classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-    info = {'classes': classes, 'train': train, 'test': tests, 'x_dim': x_dim}
+    info = {'classes': classes, 'train': train, 'test': tests,
+            'x_dim': x_dim, 'type': DataType.IMAGE.value}
     return learn_loaders, score_loaders, info
 
 
@@ -285,7 +317,8 @@ def tinyimagenet(**kwargs) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader]
     learn_loaders, score_loaders, train, tests = get_dataset(dataset_cls=TinyImageNetRecall,
                                                              **kwargs)
     classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-    info = {'classes': classes, 'train': train, 'test': tests, 'x_dim': x_dim}
+    info = {'classes': classes, 'train': train, 'test': tests,
+            'x_dim': x_dim, 'type': DataType.IMAGE.value}
     return learn_loaders, score_loaders, info
 
 
@@ -294,7 +327,8 @@ def flickr30k(**kwargs) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader], D
     learn_loaders, score_loaders, train, tests = get_dataset(dataset_cls=Flickr30kRecall,
                                                              **kwargs)
     classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-    info = {'classes': classes, 'train': train, 'test': tests, 'x_dim': x_dim}
+    info = {'classes': classes, 'train': train, 'test': tests,
+            'x_dim': x_dim, 'type': DataType.IMAGE.value}
     return learn_loaders, score_loaders, info
 
 
@@ -309,21 +343,22 @@ def dataset_dispatcher(args):
     assert (data_start_index % learn_batch_size) == 0 and (data_start_index % score_batch_size) == 0
 
     # Image preprocessing logic
-    dataset_mode = args.dataset_mode
-    transform, transform_post, noise_transforms = get_transforms(config=dataset_mode)
+    dataset, dataset_mode = args.dataset, args.dataset_mode
+    transform, transform_post, noise_transforms = get_transforms(config=dataset_mode,
+                                                                 dataset=dataset)
 
     dataset_args = dict(transform=transform, transform_post=transform_post,
                         noise_transforms=noise_transforms, data_size=data_size,
                         learn_batch_size=learn_batch_size, score_batch_size=score_batch_size,
                         data_start_index=data_start_index)
-    if args.dataset == 'toy':
+    if dataset == DatasetConst.TOY.value:
         return toy(**dataset_args)
-    elif args.dataset == 'cifar10':
+    elif dataset == DatasetConst.CIFAR10.value:
         return cifar10(**dataset_args)
-    elif args.dataset == 'tinyimagenet':
+    elif dataset == DatasetConst.TINYIMAGENET.value:
         dataset_args['max_samples'] = data_size
         return tinyimagenet(**dataset_args)
-    elif args.dataset == 'flickr30k':
+    elif dataset == DatasetConst.FLICKR30K.value:
         return flickr30k(**dataset_args)
     else:
         raise NotImplementedError()
